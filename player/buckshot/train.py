@@ -40,7 +40,11 @@ def shaped_reward(shaping: str, obs: dict, next_obs: dict, reward: float, round_
                   (potential-based shaping: proven not to change which strategy is best).
     hp_speed:     - 0.1 per HP the player lost, - 0.02 per action (faster wins pay more). Akel's test (d3).
     hp_events:    - 0.1 per HP lost, + 0.1 per HP the dealer loses to a shot, + 0.1 per HP healed (d2.1).
-    hp_events_items: hp_events and - 0.02 per item used or stolen (d3.1)."""
+    hp_events_items: hp_events and - 0.02 per item used or stolen (d3.1).
+    v4:           - 1 for dying; + 0.1 * change of (my HP - dealer HP) inside the round (damage, healing,
+                  medicine of both sides); + 0.02 per shell learned that wasn't known or deducible; - 0.05 per
+                  item used with no effect (full-HP healing, magnifier on a known shell, cuffs on the last
+                  shell, saw on a 1-HP dealer). Useful items and steals cost nothing (d4.x)."""
     if shaping == "none" or obs["phase"] == "double":
         return reward
     if shaping == "hp_potential":
@@ -48,6 +52,10 @@ def shaped_reward(shaping: str, obs: dict, next_obs: dict, reward: float, round_
         return reward + 0.1 * (after - _potential(obs))
     if shaping == "hp_speed":
         return reward - 0.1 * info["hp_lost"] - 0.02
+    if shaping == "v4":
+        r = reward - (1.0 if info["died"] else 0.0)
+        r += 0.1 * (info["d_hp_player"] - info["d_hp_dealer"])
+        return r + 0.02 * info["new_info"] - 0.05 * info["wasted"]
     if shaping in ("hp_events", "hp_events_items"):
         r = reward + 0.1 * (info["dealer_hit"] + info["hp_healed"] - info["hp_lost"])
         if shaping == "hp_events_items" and info["action"].startswith(("use:", "steal:")):
@@ -78,9 +86,12 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--items", action="store_true", help="simulator with items (v2); default: v1 rules")
     ap.add_argument("--agent", choices=("qtable", "dqn"), default="qtable")
-    ap.add_argument("--shaping", choices=("none", "hp_potential", "hp_speed", "hp_events", "hp_events_items"),
+    ap.add_argument("--shaping", choices=("none", "hp_potential", "hp_speed", "hp_events", "hp_events_items", "v4"),
                     default="none",
                     help="reward experiment on top of +1 per round won (see shaped_reward)")
+    ap.add_argument("--obs", type=int, choices=(1, 2), default=1, help="DQN observation version (2 = d4.x)")
+    ap.add_argument("--gamma", type=float, default=1.0, help="DQN discount per move (d4.x: 0.99)")
+    ap.add_argument("--n-step", type=int, default=1, help="DQN n-step returns (d4.x: 3)")
     ap.add_argument("--key", choices=("basic", "full"), default="basic",
                     help="what the Q-table keys on: basic = HP + shells, full = the whole observation")
     args = ap.parse_args()
@@ -94,7 +105,7 @@ def main() -> None:
         from torch.utils.tensorboard import SummaryWriter
 
         from player.buckshot.dqn import DQNAgent
-        agent = DQNAgent(seed=args.seed, name=args.run)
+        agent = DQNAgent(seed=args.seed, name=args.run, obs_version=args.obs, gamma=args.gamma, n_step=args.n_step)
         writer = SummaryWriter(log_dir=str(run_dir / "tb"))
         prefix, ext = "dqn", "pt"
     else:
@@ -139,6 +150,8 @@ def main() -> None:
             "agent": args.agent, "shaping": args.shaping, "items": args.items, "sim": "v2 (items)" if args.items else "v1 (no items)"}
     if args.agent == "qtable":
         meta["key"] = args.key
+    else:
+        meta.update(obs=args.obs, gamma=args.gamma, n_step=args.n_step)
     (run_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     print(f"done in {seconds:.1f} s; log: {log_path.relative_to(ROOT)}")
 

@@ -45,7 +45,8 @@ python -m player.report                    # все обучения + парт�
 python -m player.buckshot.train --games 100000 --run d4 --items --agent dqn --shaping hp_events_items
 python -m tensorboard.main --logdir runs     # живые графики: открой http://127.0.0.1:6006
 ```
-Награды (`--shaping`): `none`, `hp_potential`, `hp_speed` (d3), `hp_events` (d2.1), `hp_events_items` (d3.1).
+Награды (`--shaping`): `none`, `hp_potential`, `hp_speed` (d3), `hp_events` (d2.1), `hp_events_items` (d3.1),
+`v4` (d4.x). Для d4.x ещё `--obs 2 --gamma 0.99 --n-step 3` (новое наблюдение, дисконт, n-step).
 `--seed 1` — другой случайный старт (чтобы проверить, что результат не везение).
 
 ## 5. Разобрать версию и нарисовать отчёты

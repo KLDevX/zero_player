@@ -108,3 +108,25 @@ saw on a known live shell. Still left: expired medicine at full HP (30%).
   4.64 — only 3 games, too few to compare yet).
 - Magnifier: it uses it in 23% of the turns it has one on the real game and 25% in the simulator — its
   style, not a reading error.
+
+## v4.0 design → d4.1 (built 2026-10-23, not trained yet)
+Agreed with Akel: tell the agent what is clearly good or bad **by consequences**, never which move to make.
+| event | reward |
+|---|---|
+| round won | +1 |
+| died | **−1** |
+| HP inside the round | + 0.1 × change of (my HP − dealer HP): damage, healing, medicine of both sides |
+| learned a shell it couldn't know or work out (magnifier, phone) | +0.02 |
+| item with no effect: healing at full HP, magnifier on a known/deducible shell, cuffs on the last shell, saw on a 1-HP dealer | −0.05 |
+| useful item, steal | 0 |
+| later rewards | × 0.99 per move (γ) |
+Rejected on purpose: −10 "critical mistake" + stopping the game (we'd be deciding what's critical; it
+drowns the small signals), a risk penalty for self-shots (it bakes a "> 75% blank" rule into the reward),
++0.05 for a known blank at yourself (redundant, and a loophole next to the inverter), items left at death.
+Training: n-step = 3 (a plan's payoff reaches its first move sooner). Observation v2: + the order of shells
+out this load, + the dealer's item uses this load (both public). Run:
+`python -m player.buckshot.train --games 300000 --run d4.1 --items --agent dqn --shaping v4 --obs 2 --gamma 0.99 --n-step 3`
+Report: `replay` now has a full mistake board and an inverter-tactic detector. Baseline d3.1 (3 000 games):
+expired medicine at 1 HP 22%, saw on a 1-HP dealer 23%, could steal the saw on a known live 84% skipped;
+tactic "only lives + inverter": 601 chances, inverted 64×, then shot itself 38×.
+Not yet: the bridge doesn't report the two new observation fields (live play of d4.x would see them empty).

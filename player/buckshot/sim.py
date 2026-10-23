@@ -77,6 +77,11 @@ class State:
     hp_lost: int = 0               # for reward experiments: player HP lost in this game,
     dealer_hit: int = 0            # dealer HP lost to shots,
     hp_healed: int = 0             # player HP really gained (cigarettes, medicine; capped at max)
+    round_end_hp: tuple = ()       # (player, dealer) HP at the moment the last round ended
+    step_new_info: int = 0         # this step: shells the player learned that it couldn't know before
+    step_wasted: int = 0           # this step: items used with no effect
+    fired: list = field(default_factory=list)       # public: shells that left the gun this load, in order
+    dealer_used: dict = field(default_factory=dict)  # public: items the dealer used this load
 
 
 class BuckshotEnv:
@@ -133,6 +138,8 @@ class BuckshotEnv:
                 "saw": s.saw,
                 "dealer_cuffed": s.dealer_cuffed,
                 "player_cuffed": s.player_cuffed,
+                "fired": list(s.fired),
+                "dealer_used": dict(s.dealer_used),
             })
         return obs
 
@@ -143,6 +150,8 @@ class BuckshotEnv:
         s = self.s
         self.events = []
         rounds_before, lost_before, hit_before, healed_before = s.rounds_beat, s.hp_lost, s.dealer_hit, s.hp_healed
+        hp_before = (s.hp_player, s.hp_dealer)
+        s.step_new_info = s.step_wasted = 0
         if action == DOUBLE_NO:
             self._log("player takes the prize")
             self.done = True
@@ -165,9 +174,14 @@ class BuckshotEnv:
             again = self._shoot("player", "self" if action == SHOOT_SELF else "dealer")
             self._end_turn(player_goes_again=again)
         reward = float(s.rounds_beat - rounds_before)
+        # HP change of both sides inside the round this step (a new round resets HP; use the HP it ended with)
+        hp_after = s.round_end_hp if (reward > 0 or self.done) and s.round_end_hp else (s.hp_player, s.hp_dealer)
         info = {"events": self.events, "rounds_beat": s.rounds_beat, "cycles_beat": s.cycles_beat,
                 "hp_lost": s.hp_lost - lost_before, "dealer_hit": s.dealer_hit - hit_before,
-                "hp_healed": s.hp_healed - healed_before}
+                "hp_healed": s.hp_healed - healed_before,
+                "d_hp_player": hp_after[0] - hp_before[0], "d_hp_dealer": hp_after[1] - hp_before[1],
+                "died": self.done and action != DOUBLE_NO and s.hp_player == 0,
+                "new_info": s.step_new_info, "wasted": s.step_wasted}
         return self.observation(), reward, self.done, info
 
     # --- rules: rounds and loads ----------------------------------------------------------
@@ -209,6 +223,8 @@ class BuckshotEnv:
         s.live_left, s.blank_left = slot.live, slot.blank
         s.current_inverted = False
         s.last_shell = None
+        s.fired = []
+        s.dealer_used = {}
         s.player_knows = [None] * len(seq)
         s.dealer_knows = [False] * len(seq)
         self._log(f"load: {slot.live} live, {slot.blank} blank")
@@ -234,6 +250,7 @@ class BuckshotEnv:
             s.blank_left -= 1
         s.current_inverted = False
         s.last_shell = shell
+        s.fired.append(shell)
         s.player_knows.pop(0)
         s.dealer_knows.pop(0)
         return shell
@@ -263,6 +280,7 @@ class BuckshotEnv:
         while True:
             if s.hp_player == 0:
                 self._log("player dies")
+                s.round_end_hp = (s.hp_player, s.hp_dealer)
                 self.done = True
                 return
             if s.hp_dealer == 0:
@@ -308,6 +326,13 @@ class BuckshotEnv:
         """ItemInteraction.InteractWith for the player (ItemInteraction.gd:105-185)."""
         s = self.s
         self._log(f"{user} uses {item}")
+        # bookkeeping for reward experiments: items with no effect, and new knowledge
+        if (item == CIGARETTES and s.hp_player == s.max_hp) or (item == MEDICINE and s.hp_player == s.max_hp) \
+                or (item == MAGNIFIER and self._player_can_tell_current()) \
+                or (item == HANDCUFFS and len(s.sequence) == 1) or (item == HANDSAW and s.hp_dealer == 1):
+            s.step_wasted += 1
+        elif item == MAGNIFIER:
+            s.step_new_info += 1
         if item == HANDCUFFS:
             s.dealer_cuffed, s.dealer_breaks_free = True, False
         elif item == BEER:
@@ -346,6 +371,8 @@ class BuckshotEnv:
                 k = self.rng.randint(1, n - 1)
                 if k in (7, 8):
                     k -= 1
+                if s.player_knows[k] is None:
+                    s.step_new_info += 1
                 s.player_knows[k] = s.sequence[k]
                 self._log(f"phone: shell {k + 1} is {s.sequence[k]}")
             else:
@@ -355,6 +382,15 @@ class BuckshotEnv:
                 s.stealing = True
             else:
                 self._log("nothing to steal")
+
+    def _player_can_tell_current(self) -> bool:
+        """The player already knows the chambered shell, or can work it out from the counts and the phone."""
+        s = self.s
+        if s.player_knows and s.player_knows[0] is not None:
+            return True
+        live = s.live_left - sum(1 for k in s.player_knows[1:] if k == LIVE)
+        blank = s.blank_left - sum(1 for k in s.player_knows[1:] if k == BLANK)
+        return live == 0 or blank == 0
 
     # --- the dealer -----------------------------------------------------------------------
 
@@ -422,6 +458,7 @@ class BuckshotEnv:
                 s.items_player.remove(want)
                 self._log(f"dealer uses adrenaline and steals {want}")
             self._log(f"dealer uses {want}")
+            s.dealer_used[want] = s.dealer_used.get(want, 0) + 1
             self._dealer_item_effect(want)
         if target is None:
             target = "self" if self._coin_flip() == 0 else "player"  # ChooseWhoToShootRandomly
@@ -485,6 +522,7 @@ class BuckshotEnv:
 
     def _win_batch(self) -> None:
         s = self.s
+        s.round_end_hp = (s.hp_player, s.hp_dealer)
         s.rounds_beat += 1
         s.batch += 1
         self._log(f"dealer dies, rounds beat {s.rounds_beat}")

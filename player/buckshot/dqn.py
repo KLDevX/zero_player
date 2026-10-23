@@ -43,7 +43,23 @@ def _feature_names() -> list[str]:
     return names
 
 
-FEATURES = _feature_names()
+FEATURES = _feature_names()  # observation version 1 (d1 … d3.1)
+FIRED = range(7)            # the first 7 shells that left the gun this load
+# Version 2 (d4.x) adds public history: the order of shells out this load and the dealer's item uses.
+FEATURES_V2 = FEATURES + [f"out #{k + 1}: {c}" for k in FIRED for c in ("live", "blank")] \
+    + [f"dealer used {i}" for i in ITEMS]
+FEATURES_BY_VERSION = {1: FEATURES, 2: FEATURES_V2}
+
+
+def encode_v2(obs: dict) -> np.ndarray:
+    fired = obs.get("fired", [])
+    extra = []
+    for k in FIRED:
+        shell = fired[k] if k < len(fired) else None
+        extra += [shell == LIVE, shell == BLANK]
+    used = obs.get("dealer_used", {})
+    extra += [min(1.0, used.get(i, 0) / 2) for i in ITEMS]
+    return np.concatenate([encode(obs), np.asarray(extra, dtype=np.float32)])
 
 
 def encode(obs: dict) -> np.ndarray:
@@ -88,25 +104,33 @@ class QNet(nn.Module):
 
 
 class DQNAgent:
+    """gamma < 1 makes later rewards worth a bit less (a faster win is a bit better). n_step > 1 learns from
+    the real rewards of the next n moves instead of one, so a plan's payoff reaches its first move sooner."""
+
     def __init__(self, seed: int | None = None, epsilon: float = 0.0, name: str = "dqn", hidden: int = 64,
                  lr: float = 1e-3, batch: int = 128, memory: int = 100_000, learn_every: int = 4,
-                 warmup: int = 5_000, target_every: int = 2_000):
+                 warmup: int = 5_000, target_every: int = 2_000, obs_version: int = 1, gamma: float = 1.0,
+                 n_step: int = 1):
         self.rng = random.Random(seed)
         if seed is not None:
             torch.manual_seed(seed)
         self.name, self.hidden, self.epsilon, self.games_trained = name, hidden, epsilon, 0
-        self.net = QNet(hidden=hidden)
-        self.target = QNet(hidden=hidden)
+        self.obs_version, self.gamma, self.n_step = obs_version, gamma, n_step
+        self.features = FEATURES_BY_VERSION[obs_version]
+        self.encode = encode if obs_version == 1 else encode_v2
+        self.net = QNet(n_in=len(self.features), hidden=hidden)
+        self.target = QNet(n_in=len(self.features), hidden=hidden)
         self.target.load_state_dict(self.net.state_dict())
         self.opt = torch.optim.Adam(self.net.parameters(), lr=lr)
         self.batch, self.learn_every, self.warmup, self.target_every = batch, learn_every, warmup, target_every
         self.memory: deque = deque(maxlen=memory)
+        self.pending: deque = deque()  # the last moves of the current round, for n-step targets
         self.steps = 0
         self.last_loss = float("nan")
 
     def q_values(self, obs: dict) -> np.ndarray:
         with torch.no_grad():
-            return self.net(torch.from_numpy(encode(obs))).numpy()
+            return self.net(torch.from_numpy(self.encode(obs))).numpy()
 
     def think(self, observation: dict, legal: list[str]) -> Thought:
         q = self.q_values(observation)
@@ -122,29 +146,41 @@ class DQNAgent:
     def learn(self, obs: dict, action: str, reward: float, next_obs: dict, next_legal: list[str],
               round_over: bool) -> None:
         done = round_over or not next_legal
-        self.memory.append((encode(obs), ACTION_INDEX[action], reward, encode(next_obs),
-                            _mask(next_legal) if not done else np.zeros(len(ACTIONS), dtype=bool), done))
+        self.pending.append((self.encode(obs), ACTION_INDEX[action], reward))
+        if done:  # the round ended: every pending move gets its full discounted return, nothing after it
+            while self.pending:
+                self._push(np.zeros(len(self.features), dtype=np.float32), np.zeros(len(ACTIONS), dtype=bool), True)
+        elif len(self.pending) == self.n_step:
+            self._push(self.encode(next_obs), _mask(next_legal), False)
         self.steps += 1
         if len(self.memory) >= self.warmup and self.steps % self.learn_every == 0:
             self._train_batch()
         if self.steps % self.target_every == 0:
             self.target.load_state_dict(self.net.state_dict())
 
+    def _push(self, next_state: np.ndarray, next_mask: np.ndarray, done: bool) -> None:
+        """Store the oldest pending move with R = r0 + g*r1 + … and the discount to the state after them."""
+        ret = sum(self.gamma ** i * r for i, (_, _, r) in enumerate(self.pending))
+        disc = self.gamma ** len(self.pending)
+        s0, a0, _ = self.pending.popleft()
+        self.memory.append((s0, a0, ret, next_state, next_mask, done, disc))
+
     def _train_batch(self) -> None:
         batch = self.rng.sample(self.memory, self.batch)
-        s, a, r, s2, m2, d = zip(*batch)
+        s, a, r, s2, m2, d, g = zip(*batch)
         s, s2 = torch.from_numpy(np.stack(s)), torch.from_numpy(np.stack(s2))
         a = torch.tensor(a)
         r = torch.tensor(r, dtype=torch.float32)
         m2 = torch.from_numpy(np.stack(m2))
         d = torch.tensor(d, dtype=torch.float32)
+        g = torch.tensor(g, dtype=torch.float32)
         q = self.net(s).gather(1, a[:, None]).squeeze(1)
         with torch.no_grad():
             # Double DQN: the online net picks the best legal next action, the target net values it.
             nq_online = self.net(s2).masked_fill(~m2, -1e9)
             best = nq_online.argmax(1, keepdim=True)
             nq = self.target(s2).gather(1, best).squeeze(1)
-            target = r + (1 - d) * nq
+            target = r + (1 - d) * g * nq
         loss = nn.functional.smooth_l1_loss(q, target)
         self.opt.zero_grad()
         loss.backward()
@@ -158,13 +194,15 @@ class DQNAgent:
         path.parent.mkdir(parents=True, exist_ok=True)
         torch.save({"state_dict": self.net.state_dict(), "hidden": self.hidden, "name": self.name,
                     "games_trained": self.games_trained, "epsilon": self.epsilon, "actions": ACTIONS,
-                    "features": FEATURES,
+                    "features": self.features, "obs_version": self.obs_version, "gamma": self.gamma,
+                    "n_step": self.n_step,
                     "meta": {"saved_at": datetime.now().isoformat(timespec="seconds"), **meta}}, path)
 
     @classmethod
     def load(cls, path: Path, seed: int | None = None) -> "DQNAgent":
         data = torch.load(path, weights_only=True)
-        agent = cls(seed=seed, epsilon=0.0, name=data["name"], hidden=data["hidden"])
+        agent = cls(seed=seed, epsilon=0.0, name=data["name"], hidden=data["hidden"],
+                    obs_version=data.get("obs_version", 1), gamma=data.get("gamma", 1.0), n_step=data.get("n_step", 1))
         agent.net.load_state_dict(data["state_dict"])
         agent.games_trained = data["games_trained"]
         return agent

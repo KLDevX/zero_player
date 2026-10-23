@@ -85,6 +85,11 @@ def main() -> None:
         "expired medicine at full HP (can only lose HP)": ("expired medicine", lambda o: o["hp_player"] == o["max_hp"]),
         "magnifier when it already knows the shell": ("magnifying glass", lambda o: o.get("known_current")),
         "handsaw when it knows the shell is blank": ("handsaw", lambda o: o.get("known_current") == "blank"),
+        "expired medicine at 1 HP (50% to die)": ("expired medicine", lambda o: o["hp_player"] == 1),
+        "beer on a known live shell": ("beer", lambda o: o.get("known_current") == "live"),
+        "inverter on a known live shell": ("inverter", lambda o: o.get("known_current") == "live"),
+        "handcuffs on the last shell": ("handcuffs", lambda o: o["live_left"] + o["blank_left"] == 1),
+        "handsaw on a 1-HP dealer": ("handsaw", lambda o: o["hp_dealer"] == 1),
     }
     sus_hits, sus_uses = Counter(), Counter()
     # Chances it skipped (analysis only): description -> (was it a chance?, did it skip it?)
@@ -98,9 +103,30 @@ def main() -> None:
         "knows it's blank, shoots the dealer (gives the turn away)": (
             lambda o, l: o.get("known_current") == "blank" and o["live_left"] + o["blank_left"] > 1,
             lambda c: c == "shoot_dealer"),
+        "knows it's live, shoots itself": (
+            lambda o, l: o.get("known_current") == "live", lambda c: c == "shoot_self"),
+        "saw is on, shoots itself": (
+            lambda o, l: o.get("saw") and o["phase"] == "turn", lambda c: c == "shoot_self"),
+        # Adrenaline chances: the dealer has something useful right now that the player doesn't have.
+        "knows it's live, could steal the dealer's saw, doesn't": (
+            lambda o, l: "use:adrenaline" in l and o.get("known_current") == "live" and not o.get("saw")
+            and o.get("items_dealer", {}).get("handsaw") and not o.get("items_player", {}).get("handsaw"),
+            lambda c: c != "use:adrenaline"),
+        "hurt, could steal the dealer's cigarettes, doesn't": (
+            lambda o, l: "use:adrenaline" in l and o["hp_player"] < o["max_hp"]
+            and o.get("items_dealer", {}).get("cigarettes") and not o.get("items_player", {}).get("cigarettes"),
+            lambda c: c != "use:adrenaline"),
+        "shell unknown, could steal the dealer's magnifier, doesn't": (
+            lambda o, l: "use:adrenaline" in l and not o.get("known_current")
+            and o.get("items_dealer", {}).get("magnifying glass") and not o.get("items_player", {}).get("magnifying glass"),
+            lambda c: c != "use:adrenaline"),
     }
     miss_hits, miss_chances = Counter(), Counter()
     offered, chosen = Counter(), Counter()
+    # Tactic detector (analysis only): only lives left, an inverter in hand, the dealer not cuffed ->
+    # invert, shoot yourself with the now-blank shell, keep the turn.
+    tactic = Counter()
+    tactic_started = False
     decisions = 0
     best = (-1, 0)
     with (out / "thoughts.jsonl").open("w", encoding="utf-8") as tj:
@@ -115,6 +141,15 @@ def main() -> None:
                 decisions += 1
                 offered.update(legal)
                 chosen[t.choice] += 1
+                if tactic_started:
+                    tactic["then shoots itself with the inverted shell"] += t.choice == "shoot_self"
+                    tactic_started = False
+                if (obs["phase"] == "turn" and obs["blank_left"] == 0 and obs["live_left"] >= 2
+                        and "use:inverter" in legal and not obs.get("dealer_cuffed") and not obs.get("current_inverted")):
+                    tactic["chances (only lives, inverter, dealer free)"] += 1
+                    if t.choice == "use:inverter":
+                        tactic["inverts"] += 1
+                        tactic_started = True
                 for name, (is_chance, skipped) in missed.items():
                     if is_chance(obs, legal):
                         miss_chances[name] += 1
@@ -173,6 +208,8 @@ def main() -> None:
     md += ["", "## Chances it skipped", ""]
     md += [f"- {name}: {miss_hits[name]} of {miss_chances[name]} times ({miss_hits[name] / max(1, miss_chances[name]):.0%})"
            for name in missed]
+    md += ["", "## Tactic: only lives left + inverter -> invert, shoot yourself, keep the turn", ""]
+    md += [f"- {k}: {v}" for k, v in tactic.items()] or ["- (no chances)"]
     won = sum(rounds_all)
     stats = {
         "agent": f"{args.checkpoint.parent.name}@{args.checkpoint.stem.split('_')[-1]}", "games": n, "seed": args.seed,
@@ -182,6 +219,7 @@ def main() -> None:
         "suspicious": {k: sus_hits[k] / max(1, sus_uses[k]) for k in suspicious},
         "missed": {k: miss_hits[k] / max(1, miss_chances[k]) for k in missed},
         "combos": combos.most_common(10),
+        "tactic_inverter": dict(tactic),
     }
     (out / "stats.json").write_text(json.dumps(stats, ensure_ascii=False, indent=1), encoding="utf-8")
     (out / "tactics.md").write_text("\n".join(md) + "\n", encoding="utf-8")

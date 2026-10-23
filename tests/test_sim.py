@@ -163,3 +163,37 @@ def test_step_reports_damage_and_healing():
     assert info["hp_healed"] == 1
     _, _, _, info = env.step("use:cigarettes") if "use:cigarettes" in env.legal_actions() else env.step(SHOOT_DEALER)
     assert info["dealer_hit"] == 1
+
+
+def test_info_and_waste_flags():
+    env = _dealer_setup(13, [LIVE, BLANK, BLANK], dealer=[], player=["magnifying glass", "magnifying glass", "cigarettes"])
+    _, _, _, info = env.step("use:magnifying glass")
+    assert info["new_info"] == 1 and info["wasted"] == 0
+    _, _, _, info = env.step("use:magnifying glass")  # already known
+    assert info["wasted"] == 1
+    _, _, _, info = env.step("use:cigarettes")  # full HP
+    assert info["wasted"] == 1 and info["d_hp_player"] == 0
+
+
+def test_hp_changes_count_both_sides():
+    env = _dealer_setup(14, [BLANK, LIVE, LIVE, LIVE], dealer=["cigarettes"], player=[], hp=4)
+    env.s.hp_dealer = 3
+    _, _, _, info = env.step(SHOOT_DEALER)  # blank; the hurt dealer smokes, then shoots the player (3 lives left)
+    assert info["d_hp_dealer"] == 1 and info["d_hp_player"] == -1
+
+
+def test_dqn_n_step_returns():
+    import numpy as np
+
+    from player.buckshot.dqn import DQNAgent
+
+    env = BuckshotEnv(seed=15)
+    obs = env.reset()
+    agent = DQNAgent(seed=15, obs_version=2, gamma=0.5, n_step=3, warmup=10**9)
+    legal = env.legal_actions()
+    agent.learn(obs, legal[0], 0.0, obs, legal, round_over=False)
+    agent.learn(obs, legal[0], 1.0, obs, legal, round_over=False)
+    assert len(agent.memory) == 0  # waits for 3 moves
+    agent.learn(obs, legal[0], 2.0, obs, [], round_over=True)
+    returns = [m[2] for m in agent.memory]
+    assert np.allclose(returns, [0 + 0.5 * 1 + 0.25 * 2, 1 + 0.5 * 2, 2]) and all(m[5] for m in agent.memory)

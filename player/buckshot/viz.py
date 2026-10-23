@@ -134,13 +134,13 @@ def _example(seed: int):
 
 
 def network(ckpt: Path, seed: int) -> Path:
-    from player.buckshot.dqn import ACTIONS, FEATURES, DQNAgent, encode
+    from player.buckshot.dqn import ACTIONS, DQNAgent
     agent = DQNAgent.load(ckpt)
     obs, legal = _example(seed)
-    acts = [a.detach().numpy() for a in agent.net.activations(torch.from_numpy(encode(obs)))]
+    acts = [a.detach().numpy() for a in agent.net.activations(torch.from_numpy(agent.encode(obs)))]
     weights = [agent.net.l1.weight.detach().numpy(), agent.net.l2.weight.detach().numpy(),
                agent.net.out.weight.detach().numpy()]
-    sizes = [len(FEATURES), agent.hidden, agent.hidden, len(ACTIONS)]
+    sizes = [len(agent.features), agent.hidden, agent.hidden, len(ACTIONS)]
     xs = [0.0, 1.0, 2.0, 3.0]
     ys = [np.linspace(1, 0, n) for n in sizes]
 
@@ -163,7 +163,7 @@ def network(ckpt: Path, seed: int) -> Path:
             colors = plt.cm.Greens(0.15 + 0.85 * norm)
         ax.scatter(np.full(n, xs[li]), ys[li], s=55 if li in (1, 2) else 80, c=colors, edgecolors="black",
                    linewidths=0.5, zorder=3)
-    for k, name in enumerate(FEATURES):
+    for k, name in enumerate(agent.features):
         ax.text(xs[0] - 0.04, ys[0][k], f"{name} = {acts[0][k]:.2f}", ha="right", va="center", fontsize=7,
                 color="black" if acts[0][k] > 0 else "grey")
     for k, name in enumerate(ACTIONS):
