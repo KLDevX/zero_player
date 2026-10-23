@@ -112,12 +112,15 @@ def imagine(obs: dict, rng: random.Random) -> BuckshotEnv:
 
 
 class PlannerAgent:
-    def __init__(self, base: Path = DEFAULT_BASE, samples: int = 16, seed: int = 0, max_steps: int = 300):
+    def __init__(self, base: Path = DEFAULT_BASE, samples: int = 16, seed: int = 0, max_steps: int = 300,
+                 version: str | None = None):
         self.base = FastPolicy(base)
         self.base_name = f"{base.parent.name}@{base.stem.split('_')[-1]}"
         self.samples, self.max_steps = samples, max_steps
         self.rng = random.Random(seed)
-        self.name, self.games_trained = f"x1({samples})", 0
+        # x1 = the planner on d3.1; x1.1 = the same planner on a distilled dx network (Akel: keep both apart)
+        self.version = version or ("x1" if Path(base).resolve() == DEFAULT_BASE.resolve() else "x1.1")
+        self.name, self.games_trained = f"{self.version}({samples})", 0
 
     def _rollout(self, env: BuckshotEnv, first: str) -> int:
         start = env.s.rounds_beat
@@ -155,8 +158,9 @@ def main() -> None:
     ap.add_argument("--samples", type=int, default=16)
     ap.add_argument("--base", type=Path, default=DEFAULT_BASE)
     ap.add_argument("--seed", type=int, default=7, help="simulator seed (7 = the replays' seed)")
+    ap.add_argument("--version", default=None, help="name of this planner version (default: x1 on d3.1, else x1.1)")
     args = ap.parse_args()
-    agent = PlannerAgent(args.base, args.samples, seed=1)
+    agent = PlannerAgent(args.base, args.samples, seed=1, version=args.version)
     env = BuckshotEnv(seed=args.seed)
     rounds, decisions, t0 = [], 0, time.perf_counter()
     for g in range(1, args.games + 1):
@@ -172,7 +176,7 @@ def main() -> None:
     result = {"agent": agent.name, "base": agent.base_name, "games": n, "seed": args.seed,
               "rounds_per_game": won / n, "round_win_rate": won / (won + n), "best_game": max(rounds),
               "seconds": round(time.perf_counter() - t0, 1)}
-    out = ROOT / "reports" / f"x1_s{args.samples}_{agent.base_name}_{n}games.json"
+    out = ROOT / "reports" / f"{agent.version}_s{args.samples}_{agent.base_name}_{n}games.json"
     out.write_text(json.dumps(result, indent=1), encoding="utf-8")
     print(json.dumps(result, indent=1))
 
