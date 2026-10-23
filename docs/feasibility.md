@@ -1,6 +1,6 @@
 # Feasibility — training on the real game (stage 1, step 0)
 
-Status: **code reading done; live state reading works** (§7). Actions and a clean speed measurement are next (§8).
+Status: **done**. State, actions and speed work on the real game; one game still takes ≈ 10–70 s → recommendation: Python simulator for training, real game for testing (§10).
 Build checked: Steam buildid `16736575`, `GlobalVariables.gd` says `v2.2.0` hotfix `6`, Godot `4.1.1.stable.custom`.
 Every claim below cites `game_src/scripts/<file>:<line>` (local, git-ignored; never commit the code itself).
 
@@ -95,12 +95,56 @@ Results of Akel's first game (one Double-or-Nothing run, died in round 3):
   game-time measurement.
 - `player_input` (= `deskUI_shotgun.visible`) is also true outside a turn (e.g. before the first load) →
   needs a better "waiting for the player" signal before the bridge sends actions.
-- The game process ended with exit code 139 (crash) right after "changing scene to: menu". Not known yet
-  whether the bridge causes it — to check (repeat with and without `override.cfg`).
+- The game process ended with exit code 139 right after "changing scene to: menu" — Akel had closed the
+  window there, so this one is a crash on close, not in play.
 
-## 8. Next
-1. Find out the crash at "back to menu" (with / without the bridge).
-2. Bridge part 2: a clean "awaiting player" signal; track the player's own knowledge (magnifier, phone,
-   inverter) for the `public` part; send actions over localhost from Python.
-3. Speed test with automated moves at 5× and 10×: seconds per Double-or-Nothing run, what breaks.
-4. Apply the decision rule (`CLAUDE.md`) and write the recommendation here.
+## 8. Live test 2 — actions and speed (random test bot)
+**Actions work.** The bridge listens on `127.0.0.1:47800` (JSON lines; `player/buckshot/bridge/client.py`).
+`state` returns the public state plus the **legal actions** = every `InteractionBranch` the player could
+click right now (allowed, not invalid, collider on, cursor visible, whitelisted alias). `act` performs one
+through `InteractionManager.MainInteractionEvent()` — the same code path as a mouse click. Covers menu
+start, pills (switch to Double or Nothing), doors, waiver + signature keys, item draw (`briefcase intake`,
+`grid:N`), items, adrenaline steal, shotgun + `text you`/`text dealer`, `double yes`/`no`.
+`python -m player.buckshot.testbot --games N --speed X --mute` plays with random legal table moves
+(navigation scripted) and appends each game to `reports/games.csv`. It is a test tool, **not** an agent.
+
+Problems found and fixed on the way:
+- Clicking 50 ms after grabbing the shotgun (mid-animation) froze the game → the bot now acts only when
+  the legal set has been stable for 0.6 s of game time (human-like reaction).
+- During an adrenaline steal the game leaves the player's own items "allowed", but the camera faces the
+  dealer's side so a human can't click them (Akel's catch) → the bridge offers only dealer items then.
+- After the first dealer kill `TimeScaleManager` keeps writing `Engine.time_scale = 1.0` every frame (its
+  `moving` flag is never cleared) → speed silently fell to 1× (Akel saw it). The bridge now clears the flag
+  and sets its scale last in the frame (`process_priority`); the log records the real per-frame scale.
+- Waiver: lowercase keys; one letter is enough.
+
+Measured on Akel's laptop (games start at the pills, include the walk to the table; random moves, so most
+die in round 1 — a stronger player plays longer games):
+
+| speed | games | seconds per game | seconds per action | crashes / stalls |
+|---|---|---|---|---|
+| 1× | 1 (partial) | — (≈ 5 min to round 2) | ≈ 3–5 | 1 crash (exit 139) while drawing items, cause unknown |
+| 5× | 2 | 23.6, 24.0 | ≈ 1.06 | 0 |
+| 10× | 5 (after the fix) | 67.9, 30.4, 43.0, 10.9, 41.7 (mean 38.8) | ≈ 0.62 | 0 |
+| 20× | 2 | 10.0, 20.2 | ≈ 0.44 | 0 |
+
+The real per-frame scale stayed at 10 for the whole 10× run (one 0.22 frame). No physics or animation
+breakage seen at 10× and 20×. Above 10× the gain shrinks (≈ 0.1 s per action is bot + polling overhead).
+
+## 9. Fragility
+- Pinned to this build (v2.2.0.6, buildid 16736575): script paths, node names and variable names come from
+  the code. An update may rename them; `override.cfg` itself survives updates.
+- One unexplained crash (exit 139) in ~12 bot games; a frozen game needs a restart (no auto-recovery yet).
+- Timing-sensitive: clicks must wait for animations; the game's own slow-mo fights the speed.
+- Runs only with the game window open (one game at a time on this laptop), and only in the lab copy.
+
+## 10. Recommendation (decision rule from `CLAUDE.md`)
+State ✔ and actions ✔ on the real game, speed ✔ (10–20× without breaking). **But a game takes ≈ 10–70 s
+even at 10–20×** (mean ≈ 39 s at 10× for a *random* player; a good player survives more rounds, so its
+games get longer). The rule says ≲ 10 s → this fails. Q-learning needs tens of thousands of games:
+10 000 games × 40 s ≈ 110 hours on one window.
+
+→ **Build the Python simulator** (`player/buckshot/sim.py`) from the decompiled rules (§3–§5, dealer ported
+from `DealerIntelligence.gd`) and train there. Use the real game through this bridge to **test** the
+trained agent (and to check the simulator against real games: same state fields, same legal actions),
+and later for the "thoughts" overlay.
