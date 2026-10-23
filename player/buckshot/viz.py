@@ -2,6 +2,7 @@
 
     python -m player.buckshot.viz curves                 # learning curves of all runs
     python -m player.buckshot.viz compare d1 d2 d3          # side by side, from the replays' stats.json
+    python -m player.buckshot.viz ladder d3.1 dx1.5 reports/x1_s16_300games.json   # one bar per player, ± error
     python -m player.buckshot.viz network runs/d1/dqn_100000.pt [--seed 3]
                                                          # the network: inputs → hidden → outputs,
                                                          # strongest weights, neurons lit for one situation
@@ -118,6 +119,35 @@ def compare(runs: list[str]) -> list[Path]:
     return outs
 
 
+def ladder(items: list[str]) -> Path:
+    """One bar per player (replay runs or planner result files) with ± one standard error.
+    Rounds per game are close to geometric, so the error is sqrt(mean * (1 + mean) / games)."""
+    names, means, errs, colors = [], [], [], []
+    for it in items:
+        if it.endswith(".json"):
+            r = json.loads(Path(it).read_text(encoding="utf-8"))
+            name, mean, n, col = f"{r['agent'].split('(')[0]} on {r['base'].split('@')[0]}", r["rounds_per_game"], r["games"], "tab:orange"
+        else:
+            r = _stats(it)
+            name, mean, n = it, r["rounds_per_game"], r["games"]
+            col = "tab:green" if it.startswith("dx") else "tab:blue"
+        names.append(f"{name}\n({n} games)")
+        means.append(mean)
+        errs.append((mean * (1 + mean) / n) ** 0.5)
+        colors.append(col)
+    fig, ax = plt.subplots(figsize=(max(8, 1.25 * len(items)), 5))
+    bars = ax.bar(range(len(items)), means, yerr=errs, capsize=4, color=colors)
+    ax.bar_label(bars, labels=[f"{m:.2f}" for m in means], padding=6)
+    ax.set_xticks(range(len(items)), names, fontsize=8)
+    ax.set_ylabel("rounds survived per game")
+    ax.set_title("blue: learned by itself (DQN) · green: learned from the planner (dx) · orange: planner (x)")
+    ax.grid(axis="y", alpha=0.3)
+    fig.tight_layout()
+    out = REPORTS / "ladder.png"
+    fig.savefig(out, dpi=120)
+    return out
+
+
 def _example(seed: int):
     """A real situation from the simulator: the first player decision with at least 3 items in hand."""
     from player.buckshot.sim import BuckshotEnv
@@ -191,12 +221,16 @@ def main() -> None:
     sub.add_parser("curves")
     c = sub.add_parser("compare")
     c.add_argument("runs", nargs="+")
+    lad = sub.add_parser("ladder")
+    lad.add_argument("items", nargs="+")
     n = sub.add_parser("network")
     n.add_argument("checkpoint", type=Path)
     n.add_argument("--seed", type=int, default=3)
     args = ap.parse_args()
     if args.what == "compare":
         outs = compare(args.runs)
+    elif args.what == "ladder":
+        outs = [ladder(args.items)]
     else:
         outs = [curves() if args.what == "curves" else network(args.checkpoint, args.seed)]
     for out in outs:

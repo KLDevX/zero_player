@@ -189,3 +189,35 @@ is weaker than d3.1 here; d3.1 is a single seed, so its own luck is unknown too.
   84–155 times out of ~1 200–1 300 chances (d3.1: 56 of 966).
 ![results](img/v0.8-compare-results.png)
 ![mistakes](img/v0.8-compare-mistakes.png)
+
+## dx1 — the network learns from the planner (night of 2026-10-24, 1 h 50 min, all automatic)
+`python -m player.buckshot.distill loop`. Teacher: x1 (16 samples per move, base player d3.1.3-s2).
+1. x1 played 3 000 games and wrote the chance to win the round for every legal move: 194 022 tables (16 min,
+   12 processes). The double-or-nothing question isn't calculated by x1, so 3 000 rows teach "go on"
+   (worth the mean best chance) vs "take the money" (0) — without them dx1.0 took the money after
+   3 rounds every game.
+2. dx1.0: the d-agents' network shape with the 73-number view, trained to predict x1's chances (MSE on the
+   legal moves) — 24 s.
+3. DAgger ×5: the latest dx plays 3 000 games, x1 answers on the tables *dx* reached (its own mistakes
+   included), the lessons add up, the next dx starts from the previous one.
+| version | lessons | prediction error (rmse) | rounds/game (5 000 games) | rounds won | best |
+|---|---|---|---|---|---|
+| dx1.0 | 197 k | 0.123 | 4.84 | 82.9% | 62 |
+| dx1.1 | 344 k | 0.117 | 5.49 | 84.6% | 53 |
+| dx1.2 | 502 k | 0.113 | 5.61 | 84.9% | 47 |
+| dx1.3 | 666 k | 0.112 | 5.92 | 85.5% | 61 |
+| dx1.4 | 829 k | 0.110 | 5.87 | 85.5% | 60 |
+| **dx1.5** | 992 k | 0.110 | **5.99** | **85.7%** | 57 |
+- **dx1.5 is the strongest player so far**: 5.99 ± 0.09 vs the best self-taught d3.1.3-s2 5.53 ± 0.08 and its
+  teacher x1 5.75 ± 0.35. The student passes the teacher because it averages a million noisy 16-sample
+  answers, which is more precise than one answer.
+- The gains flatten after dx1.3 (+0.31, −0.05, +0.12): the limit of this teacher. The stop rule (two rounds
+  in a row < 0.1) didn't trigger; all five rounds ran.
+- What it took from the planner: expired medicine at 1 HP 22% → 11%; the inverter tactic finished
+  224 times in 1 281 chances (d3.1.3-s2: 84 in 1 201). Still: smoking at full HP 24%, hurt but not smoking
+  53% of the moves (it often smokes a move later), skipping a steal of the dealer's saw on a known live 56%.
+- **x1.1** = the same planner with dx1.5 as its base player: 4.98 ± 0.30 (300 games) — *worse* than dx1.5
+  alone. With a base this good, 16 imagined tables per move are noisier than the network's own estimate;
+  a planner on top of dx needs many more samples, or to use dx's values as a starting point.
+![ladder](img/v0.9-ladder.png)
+![mistakes](img/v0.9-compare-mistakes.png)
