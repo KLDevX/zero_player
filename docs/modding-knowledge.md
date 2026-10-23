@@ -22,8 +22,13 @@ or **[source]** (from a third-party page — verify against our own decompile be
 - Steam appid `2835570`, buildid `16736575`, size on disk ≈ 1.33 GB. The exe is ≈ 796 MB. There is **no
   separate `.pck`**, so the pack is embedded in the exe.
 - Engine string in the exe: `Godot Engine v4.1.1.stable.custom`. "custom" most likely means a GodotSteam
-  build (the exe ships with `steam_api64.dll`).
-- Scripts under `res://scripts/` (names only, taken from the exe). The interesting ones:
+  build (the exe ships with `steam_api64.dll`). Game version in `GlobalVariables.gd`: **v2.2.0 hotfix 6**.
+- Embedded pack: PCK format 2, **unencrypted**, 3572 files; directory offsets are absolute in the exe.
+  All 195 `.gd` files are **plain-text source**, so a small Python reader extracts them (no GDRE needed
+  to *read* code; GDRE only for a full project rebuild). Details and the state/action map:
+  `docs/feasibility.md`.
+- Built-in dev speed keys (`.` = 10×) exist behind `GlobalVariables.mp_debug_keys_enabled` (false in release).
+- Scripts under `res://scripts/`. The interesting ones:
   - Game flow: `RoundManager.gd`, `RoundBatch.gd`, `RoundClass.gd`, `EndlessMode.gd` (Double or Nothing),
     `GameOverManager.gd`, `DeathManager.gd`, `ResetManager.gd`
   - Shells: `ShellLoader.gd`, `ShellSpawner.gd`, `ShellBranch.gd`, `ShellEjectManager.gd`,
