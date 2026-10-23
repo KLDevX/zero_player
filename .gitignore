@@ -1,0 +1,10 @@
+# Decompiled game code and game files: never commit or publish (it is the developer's property)
+game_src/
+*.pck
+# Python
+__pycache__/
+.venv/
+*.pyc
+# Training outputs
+runs/
+*.pkl
