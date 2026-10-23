@@ -60,6 +60,9 @@ var k_live := 0               # original colours still in the gun
 var k_blank := 0
 var k_anim := ""              # the player's hands animation last frame
 var k_phone_wait := false     # burner phone used: read its message
+var k_fired: Array = []       # shells that left the gun this load, in order (public)
+var k_dealer_used := {}       # items the dealer used this load (public: you watch him do it)
+var k_table_prev := {}        # {"player": {...}, "dealer": {...}} item counts on the table last frame
 
 
 func _ready() -> void:
@@ -120,6 +123,9 @@ func _rescan() -> void:
 	phone = null
 	k_prev = []
 	k_knows = []
+	k_fired = []
+	k_dealer_used = {}
+	k_table_prev = {}
 	menu_started = false
 	if scene == null:
 		return
@@ -294,6 +300,8 @@ func _track_knowledge() -> void:
 	if seq.size() > k_prev.size():
 		# a new load: the shells shown on the table are the public counts
 		var r = rm.roundArray[rm.currentRound]
+		k_fired = []
+		k_dealer_used = {}
 		k_knows = []
 		k_knows.resize(seq.size())
 		k_knows.fill("")
@@ -310,6 +318,7 @@ func _track_knowledge() -> void:
 		else:
 			k_blank -= 1
 		k_last = shell
+		k_fired.append(shell)
 		k_inverted = false
 		if k_knows.size() > 0:
 			k_knows.pop_front()
@@ -330,6 +339,38 @@ func _track_knowledge() -> void:
 	if k_phone_wait:
 		_read_phone(seq)
 	k_prev = seq.duplicate()
+	_track_dealer_items(seq)
+
+
+# The dealer used an item = exactly one of his items left the table while the player's items stayed and the
+# player isn't stealing. A table clear (new round) removes many at once and is ignored. Known gap: when the
+# dealer steals the player's item with adrenaline, only the adrenaline is counted.
+func _track_dealer_items(seq: Array) -> void:
+	var now := _table_items()
+	if not k_table_prev.is_empty() and seq.size() > 0:
+		var before: Dictionary = k_table_prev["dealer"]
+		var drops := []
+		for item in before:
+			for i in range(before[item] - now["dealer"].get(item, 0)):
+				drops.append(item)
+		var stealing: bool = item_interaction != null and item_interaction.stealing
+		if drops.size() == 1 and now["player"] == k_table_prev["player"] and not stealing:
+			k_dealer_used[drops[0]] = k_dealer_used.get(drops[0], 0) + 1
+	k_table_prev = now
+
+
+func _table_items() -> Dictionary:
+	var player := {}
+	var dealer := {}
+	for c in rm.itemManager.itemSpawnParent.get_children():
+		if c.get_child_count() < 2:
+			continue
+		var b = c.get_child(1)
+		if b.get_script() == null or b.get_script().resource_path != BRANCH_PATH or b.itemName == "":
+			continue
+		var side: Dictionary = player if b.isPlayerSide else dealer
+		side[b.itemName] = side.get(b.itemName, 0) + 1
+	return {"player": player, "dealer": dealer}
 
 
 # The phone's message names a position and a colour (BurnerPhone.gd:6-35); match it in the current language.
@@ -362,16 +403,9 @@ func _public() -> Dictionary:
 		load_info = {"max_hp": rm.roundArray[0].startingHealth, "loaded_live": r.amountLive, "loaded_blank": r.amountBlank}
 	# Count the items lying on the table, as the player sees them. The game's own counters (amount_player)
 	# go wrong after an adrenaline steal: the stolen item is subtracted twice (ItemInteraction.gd:84-86, 107-111).
-	var items_player := {}
-	var items_dealer := {}
-	for c in rm.itemManager.itemSpawnParent.get_children():
-		if c.get_child_count() < 2:
-			continue
-		var b = c.get_child(1)
-		if b.get_script() == null or b.get_script().resource_path != BRANCH_PATH or b.itemName == "":
-			continue
-		var side: Dictionary = items_player if b.isPlayerSide else items_dealer
-		side[b.itemName] = side.get(b.itemName, 0) + 1
+	var table := _table_items()
+	var items_player: Dictionary = table["player"]
+	var items_dealer: Dictionary = table["dealer"]
 	return {
 		"endless": rm.endless,
 		"batch": rm.playerData.currentBatchIndex,
@@ -396,6 +430,8 @@ func _public() -> Dictionary:
 		"known_current": k_knows[0] if k_knows.size() > 0 else "",
 		"known_later": _known_later(),
 		"stealing": item_interaction != null and item_interaction.stealing,
+		"fired": k_fired.duplicate(),
+		"dealer_used": k_dealer_used.duplicate(),
 	}
 
 

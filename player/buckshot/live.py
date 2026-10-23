@@ -48,6 +48,8 @@ def observation(public: dict, legal_keys: list[str]) -> tuple[dict | None, list[
         "saw": public["saw"],
         "dealer_cuffed": public["dealer_cuffed"],
         "player_cuffed": public["player_cuffed"],
+        "fired": public.get("fired", []),
+        "dealer_used": public.get("dealer_used", {}),
     }
     return obs, legal
 

@@ -129,4 +129,8 @@ out this load, + the dealer's item uses this load (both public). Run:
 Report: `replay` now has a full mistake board and an inverter-tactic detector. Baseline d3.1 (3 000 games):
 expired medicine at 1 HP 22%, saw on a 1-HP dealer 23%, could steal the saw on a known live 84% skipped;
 tactic "only lives + inverter": 601 chances, inverted 64×, then shot itself 38×.
-Not yet: the bridge doesn't report the two new observation fields (live play of d4.x would see them empty).
+Part B (done): the bridge reports both new fields — `fired` (order of shells out this load) and
+`dealer_used` (one dealer item leaving the table while the player's stay and the player isn't stealing;
+known gap: a dealer adrenaline steal counts only the adrenaline). Checked live with d3.1: 104 decisions, no
+reading problems, phone read 5 of 5, dealer item uses seen for 8 item types; that game: **8 rounds survived**
+(best real game so far).

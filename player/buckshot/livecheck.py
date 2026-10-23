@@ -28,6 +28,11 @@ def checks(rec: dict) -> list[str]:
                 item = key.split(":")[1]
                 if not obs.get("items_player", {}).get(item):
                     found.append(f"{item} is clickable but the count says 0")
+    info = pub.get("load_info") or {}
+    if "fired" in obs and info:
+        out = info["loaded_live"] + info["loaded_blank"] - pub.get("shells_left", 0)
+        if len(obs["fired"]) != out:
+            found.append(f"shells out: {len(obs['fired'])} in the history but {out} left the gun")
     if obs["hp_player"] > obs["max_hp"] or obs["hp_dealer"] > obs["max_hp"]:
         found.append(f"HP above max ({obs['hp_player']}/{obs['hp_dealer']} > {obs['max_hp']})")
     return found
@@ -42,6 +47,20 @@ def main() -> None:
     recs = [json.loads(line) for line in path.open(encoding="utf-8")]
     problems, choices, offered = Counter(), Counter(), Counter()
     examples = {}
+    phone = Counter()
+    for prev, r in zip(recs, recs[1:]):
+        if prev["thought"]["choice"] in ("use:burner phone", "steal:burner phone"):
+            left = (prev["bridge_public"] or {}).get("shells_left", 0)
+            if left <= 1:
+                phone["used on the last shell (nothing to tell)"] += 1
+            elif r["thought"]["observation"].get("known_later"):
+                phone["read: the next decision knows a later shell"] += 1
+            else:
+                phone["NOT read: no later shell known after the phone"] += 1
+    used = Counter()
+    for r in recs:
+        for item, n in (r["thought"]["observation"].get("dealer_used") or {}).items():
+            used[item] = max(used[item], n)
     for r in recs:
         for p in checks(r):
             kind = p.split(":")[0] if ":" in p else p.split(" but")[0]
@@ -53,6 +72,8 @@ def main() -> None:
     print("\nreading problems (bridge/adapter):" if problems else "\nno reading problems found")
     for kind, n in problems.most_common():
         print(f"  {n:4d}× {examples[kind][1]}   (first at {examples[kind][0]})")
+    print("\nburner phone:", dict(phone) if phone else "not used in this session")
+    print("dealer item uses seen (most in one load):", dict(used) if used else "none")
     print("\nhow often it picked a move when it was possible:")
     for a, n in sorted(offered.items(), key=lambda kv: -choices[kv[0]] / kv[1]):
         print(f"  {a:28s} {choices[a] / n:4.0%} of {n}")
