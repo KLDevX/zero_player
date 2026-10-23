@@ -171,3 +171,21 @@ range, so d4.1 wasn't just unlucky, and the tables (method 2) don't seem to hurt
 is weaker than d3.1 here; d3.1 is a single seed, so its own luck is unknown too.
 ![results](img/v0.7-compare-results.png)
 ![mistakes](img/v0.7-compare-mistakes.png)
+
+## d3.1.3 (d3.1 trained with 3 seeds × 32 tables) and x1 (the planner)
+| run | games | rounds/game | rounds won | best |
+|---|---|---|---|---|
+| d3.1 (1 seed, 1 table) | 5 000 | 4.64 | 82.3% | 43 |
+| d3.1.3-s0 | 5 000 | 5.02 | 83.4% | 48 |
+| d3.1.3-s1 | 5 000 | 5.28 | 84.1% | **66** |
+| d3.1.3-s2 | 5 000 | **5.53** | 84.7% | 49 |
+| d4.2.3 (3 seeds) | 5 000 each | 3.23–3.81 | 76–79% | 27–45 |
+| **x1** (16 samples, base d3.1) | 300 | **5.75 ± 0.35** | **85.2%** | 33 |
+- d3.1.3 (mean 5.28) beats d3.1 (4.64): the same reward trained on 32 tables with the bigger batch is
+  better — so the tables help, and the v4 package (d4.x) is what's weaker, not the training method.
+- x1 lifts its base player d3.1 from 4.64 to 5.75 rounds/game: one move of real calculation per turn is
+  worth about +1.1 rounds. 38 ms per move. (300 games → ± about 0.35.)
+- Mistakes of d3.1.3: medicine at 1 HP 12–32%, saw on a 1-HP dealer 5–23%; inverter tactic finished
+  84–155 times out of ~1 200–1 300 chances (d3.1: 56 of 966).
+![results](img/v0.8-compare-results.png)
+![mistakes](img/v0.8-compare-mistakes.png)
