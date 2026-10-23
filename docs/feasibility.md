@@ -1,6 +1,6 @@
 # Feasibility — training on the real game (stage 1, step 0)
 
-Status: **part 1 of 2 done (code reading)**. Part 2 (live test: mod/bridge, speed, seconds per game) is next.
+Status: **code reading done; live state reading works** (§7). Actions and a clean speed measurement are next (§8).
 Build checked: Steam buildid `16736575`, `GlobalVariables.gd` says `v2.2.0` hotfix `6`, Godot `4.1.1.stable.custom`.
 Every claim below cites `game_src/scripts/<file>:<line>` (local, git-ignored; never commit the code itself).
 
@@ -71,10 +71,36 @@ So a mod can play by calling these directly, no fake clicks.
   The mod must stub `UploadScore` before any automated game.
 - Achievements (`AchievementManager.gd`) — harmless, Akel's call.
 
-## 7. Next (part 2, live)
-1. Pick the mod route: BRML-E vs. a loader baked into a rebuilt copy (game is v2.2.0.6; BRML targets old
-   builds). Downloads only after Akel's "да".
-2. Hello-world mod in a **separate copy** of the game: print the state table above each turn, stub
-   `UploadScore`.
-3. Speed test at 2×, 5×, 10×; measure seconds per Double-or-Nothing run; note what breaks.
+## 7. Live test 1 — reading state works (2026-10-23)
+**Route: no download, no exe patch.** Godot reads `override.cfg` next to the exe at startup; ours adds one
+autoload, `player/buckshot/bridge/bridge.gd` (absolute path works in the exported game). Setup:
+- Save files backed up to `game_lab/save_backup_2026-10-23/`; game copied to `game_lab/game/` (git-ignored),
+  `override.cfg` copied there. The Steam folder is untouched.
+- The bridge sets `GlobalVariables.using_steam = false` before the scenes load → no leaderboard upload, no
+  achievements (`EndingManager.gd:175`, `LeaderboardManager.gd:22`). Steam was not running anyway
+  (`steam init: Steam not running`), and the copy still runs fine without it.
+- It also sets `mp_debug_keys_enabled = true`, so `.` = 10× and `,` = 1× work.
+- It finds `RoundManager` by script path (`/root/main/standalone managers/round manager`), again after each
+  scene reload (death → main), and appends one JSON line per state change to `reports/live_*.jsonl`
+  (`public` part + `_hidden` part for checking only). Watch it live: `python -m player.buckshot.bridge.watch`.
+
+Results of Akel's first game (one Double-or-Nothing run, died in round 3):
+- All fields read correctly and change as expected: HP both sides, loaded live/blank and max HP per load,
+  shells left, item counts on both sides, cuffs, saw, rounds beat. 168 state lines, 0 script errors.
+- `rounds_beat` was 3 when he died in round 3 → the counter **includes the round you die in**; rounds
+  survived = `rounds_beat − 1` on death.
+- Speed: `time_scale` 10 seen (the dev key works); 0.56 / 0.83 values are the game's own slow-mo after a
+  dealer kill lerping back to **1** (confirms §2 — a bot must re-apply its speed).
+- The run took 531 s at mostly 1× **with a human thinking**; 25 player decision points. Not yet a clean
+  game-time measurement.
+- `player_input` (= `deskUI_shotgun.visible`) is also true outside a turn (e.g. before the first load) →
+  needs a better "waiting for the player" signal before the bridge sends actions.
+- The game process ended with exit code 139 (crash) right after "changing scene to: menu". Not known yet
+  whether the bridge causes it — to check (repeat with and without `override.cfg`).
+
+## 8. Next
+1. Find out the crash at "back to menu" (with / without the bridge).
+2. Bridge part 2: a clean "awaiting player" signal; track the player's own knowledge (magnifier, phone,
+   inverter) for the `public` part; send actions over localhost from Python.
+3. Speed test with automated moves at 5× and 10×: seconds per Double-or-Nothing run, what breaks.
 4. Apply the decision rule (`CLAUDE.md`) and write the recommendation here.

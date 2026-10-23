@@ -10,3 +10,6 @@ runs/
 *.pkl
 reports/*.db
 reports/*.csv
+reports/*.jsonl
+# Modded copy of the game for live tests (game files, never commit)
+game_lab/
