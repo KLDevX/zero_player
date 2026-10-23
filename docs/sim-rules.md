@@ -33,13 +33,29 @@ the game's scene data (`main.scn`, values below), **log** = seen in our live log
 | Inverter: flips the chambered shell; the player doesn't see the result unless he knew the shell | `_use_item` | code `ItemInteraction.gd:165-171` |
 | Burner phone: tells one random later shell (index 1..n−1, index 7 is reported as 6); nothing if it's the last shell | `_use_item` | code `BurnerPhone.gd:6-35` |
 | Adrenaline: steal one dealer item (not adrenaline) and use it at once | `legal_actions`, `step` | code `ItemManager.gd:399-432`, `ItemInteraction.gd:51-104` |
-| The dealer uses items | — | **not yet** (part 2: `DealerIntelligence.gd:85-281`) |
+| Items are kept in the order they were drawn | `items_player`, `items_dealer` | code `DealerIntelligence.gd:121-142` |
 
-## Dealer shot choice (no items yet)
-| Rule | Sim | Confidence |
-|---|---|---|
-| Knows the shell if it is the last one, all left are one colour, or its memory settles it → blank: self, live: player; otherwise majority colour, coin flip on a tie | `_dealer_choice` | code `DealerIntelligence.gd:96-110, 282-303, 421-431` |
-| Counts the real shells (so it "sees" an inversion in its count) | `_dealer_choice` | code `DealerIntelligence.gd:285-292` |
+## The dealer (`_dealer_turn`, `DealerIntelligence.gd:65-281, 282-303, 421-431`)
+Each step of his turn he goes through his items **in draw order** and takes the first one a rule wants,
+uses it, and starts again; when no rule fires he shoots.
+| Rule | Confidence |
+|---|---|
+| Knows the shell if it is the last one, or the real counts + his phone memory settle it → target: blank → self, live → player | code `:96-110, 282-303` |
+| Magnifier: if he doesn't know the shell (and it isn't the last) | code `:144-151` |
+| Cigarettes: if hurt | code `:152-156` |
+| Expired medicine: if hurt, no cigarettes, HP ≠ 1, once per turn; 50% +2 / 50% −1 | code `:157-161, 230-235`, `HealthCounter.gd:126-135` |
+| Beer: if the shell isn't known live (also when known blank!); forgets the shell but keeps his target | code `:162-168` |
+| Handcuffs: if the player isn't cuffed (and it isn't the last shell) | code `:169-172` |
+| Handsaw: if the shell is known live | code `:173-178` |
+| Burner phone: if more than 2 shells; remembers one random later shell | code `:179-186` |
+| Inverter: if he knows it's blank → live, shoot the player | code `:187-193` |
+| No rule fired but he has a saw and the shell isn't known blank: coin flip → saw + shoot player, or shoot himself | code `:204-215` |
+| With adrenaline in hand he also looks at the player's items (after his own) and steals one when a rule wants it and he has no copy | code `:121-142, 242-257` |
+| Shot with no target: majority colour of the real shells, coin flip on a tie | code `:326-329, 421-431` |
+| Counts the real shells (so he "sees" an inversion) | code `:285-292` |
+
+Check against the real game: a random player survives **0.185** rounds/game in the sim vs **0.18** for the
+random test bot on the real game (11 games through the bridge).
 
 ## Observation (what the agent sees)
 HP both sides, max HP, original live/blank left in the gun, whether the chambered shell was inverted, the

@@ -7,6 +7,8 @@ kept in `runs/archive/<tag>/` (local only, git-ignored). Numbers: simulator, 10 
 |---|---|---|---|---|
 | — | 2026-10-23 | random player (baseline) | 0.64 | 39.1% |
 | `v0.1-qtable-no-items` | 2026-10-23 | sim v1 without items, Q-table, 100k games in 17 s | 2.73 | 73.2% |
+| — | 2026-10-23 | random player, **full rules with items** (sim v2) | 0.185 | 15.6% |
+| `v0.2-qtable-items` | 2026-10-23 | sim v2 (items, dealer items), Q-table on HP + shells, 300k games in 219 s | 1.52 | 60.4% |
 
 ## v0.1-qtable-no-items
 - Simulator: rounds, HP 2–4, loads 2–8, the dealer's item-free logic, and an "unshuffled loads" quirk that
@@ -15,8 +17,16 @@ kept in `runs/archive/<tag>/` (local only, git-ignored). Numbers: simulator, 10 
 - Learning curve (rounds/game per tenth of training): 0.71 0.93 1.25 1.63 2.19 2.51 2.52 2.46 2.53 2.53.
 - Checkpoints: @100 0.83, @1 000 1.94, @10 000 2.62, @100 000 2.73.
 
-## Next: v0.2 (in progress) — items
-- Sim v2: 5 load slots per round, item caps from the game's scene data, all 9 player items, adrenaline steal.
-  Dealer draws items but does not use them yet.
-- Random player with items: 0.76 rounds/game, 43.1% rounds won (without items 0.60 / 37.7%).
-- Q-table (no items) retrained on the corrected rules: 2.72 rounds/game, 73.1%.
+## v0.2-qtable-items
+- Sim v2: 5 load slots per round, item caps from the game's scene data, all 9 items for both sides,
+  adrenaline steals, the dealer's item rules in draw order. Random player 0.185 rounds/game — the random
+  test bot on the real game got 0.18.
+- Q-table on the basic state (HP + shells; items only as available moves), 300k games, 219 s:
+  learning curve 0.22 0.32 0.47 0.70 1.06 1.33 1.33 1.35 1.35 1.32; checkpoints @10k 0.86, @100k 1.51,
+  @300k 1.52 rounds/game (60.4% rounds won).
+- What it learned to use when available: magnifier 42%, cigarettes 33%, adrenaline 26%, beer 19%,
+  inverter 15%; steals cigarettes 61% and magnifier 58%; shoots the dealer 42%, itself 4%; always doubles.
+- Q-table on the **full** state (all items, cuffs, saw, phone knowledge): stopped at 76k games — 705 844
+  different states (≈ 10 new per game), ~2.5 GB RAM, plays like random (0.19). The table can't cover it →
+  the next agent is a neural network (DQN) that generalises between similar states.
+- Q-table without items retrained on the corrected rules: 2.72 rounds/game, 73.1%.

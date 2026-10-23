@@ -51,7 +51,7 @@ def training_runs() -> None:
         mean, best, win = summarize(rounds)
         tenth = max(1, len(rounds) // 10)
         last_mean = sum(rounds[-tenth:]) / tenth
-        rows.append([run, len(rounds), f"{seconds} s", f"{mean:.2f}", f"{last_mean:.2f}", best, f"{win:.1%}"])
+        rows.append([run, len(rounds), f"{seconds} s" if isinstance(seconds, (int, float)) else seconds, f"{mean:.2f}", f"{last_mean:.2f}", best, f"{win:.1%}"])
         blocks = [rounds[i:i + tenth] for i in range(0, len(rounds), tenth)][:10]
         progress.append(f"{run}: " + "  ".join(f"{sum(b) / len(b):.2f}" for b in blocks))
     if not rows:

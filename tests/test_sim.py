@@ -19,8 +19,8 @@ def play_random(env: BuckshotEnv, rng: random.Random) -> None:
             assert s.live_left == original.count(LIVE)
             assert s.blank_left == original.count(BLANK)
             assert s.live_left >= 1 or s.blank_left >= 1
-            assert all(0 <= s.items_player.get(i, 0) <= ITEM_CAPS[i] for i in ITEMS)
-            assert sum(s.items_player.values()) <= 8 and sum(s.items_dealer.values()) <= 8
+            assert all(s.items_player.count(i) <= ITEM_CAPS[i] for i in ITEMS)
+            assert len(s.items_player) <= 8 and len(s.items_dealer) <= 8
         env.step(rng.choice(env.legal_actions()))
 
 
@@ -48,6 +48,7 @@ def test_blank_at_self_keeps_the_turn():
     env.s.live_left, env.s.blank_left = 2, 1
     env.s.player_knows = [None] * 3
     env.s.dealer_knows = [False] * 3
+    env.s.items_player, env.s.items_dealer = [], []
     _, _, _, info = env.step(SHOOT_SELF)
     assert info["events"] == ["player shoots self: blank"]
 
@@ -60,6 +61,7 @@ def test_dealer_shoots_player_when_lives_are_the_majority():
     env.s.player_knows = [None] * 4
     env.s.dealer_knows = [False] * 4
     env.s.hp_player = env.s.hp_dealer = 4
+    env.s.items_player, env.s.items_dealer = [], []
     _, _, _, info = env.step(SHOOT_DEALER)  # blank at the dealer → dealer's turn, 3 lives left
     assert info["events"][1] == "dealer shoots player: live"
 
@@ -76,7 +78,7 @@ def test_saw_doubles_damage_once():
     env = BuckshotEnv(seed=5)
     env.reset()
     env.s.hp_player = env.s.hp_dealer = env.s.max_hp = 4
-    env.s.items_player = {i: 0 for i in ITEMS} | {"handsaw": 1}
+    env.s.items_player, env.s.items_dealer = ["handsaw"], []
     _set_gun(env, [LIVE, BLANK, BLANK, BLANK])
     env.step("use:handsaw")
     assert "use:handsaw" not in env.legal_actions()
@@ -88,7 +90,7 @@ def test_handcuffs_skip_one_dealer_turn():
     env = BuckshotEnv(seed=6)
     env.reset()
     env.s.hp_player = env.s.hp_dealer = env.s.max_hp = 4
-    env.s.items_player = {i: 0 for i in ITEMS} | {"handcuffs": 1}
+    env.s.items_player, env.s.items_dealer = ["handcuffs"], []
     _set_gun(env, [BLANK, BLANK, LIVE, LIVE, LIVE])
     env.step("use:handcuffs")
     _, _, _, info = env.step(SHOOT_DEALER)  # blank; the cuffed dealer skips, the player goes again
@@ -100,8 +102,34 @@ def test_handcuffs_skip_one_dealer_turn():
 def test_inverter_hides_the_change_from_the_counts():
     env = BuckshotEnv(seed=7)
     env.reset()
-    env.s.items_player = {i: 0 for i in ITEMS} | {"inverter": 1}
+    env.s.items_player, env.s.items_dealer = ["inverter"], []
     _set_gun(env, [BLANK, LIVE])
     obs, *_ = env.step("use:inverter")
     assert obs["live_left"] == 1 and obs["blank_left"] == 1 and obs["current_inverted"]
     assert env.s.sequence == [LIVE, LIVE]
+
+
+def _dealer_setup(seed: int, seq: list[str], dealer: list[str], player: list[str], hp: int = 4) -> BuckshotEnv:
+    env = BuckshotEnv(seed=seed)
+    env.reset()
+    env.s.hp_player = env.s.hp_dealer = env.s.max_hp = hp
+    env.s.items_player, env.s.items_dealer = list(player), list(dealer)
+    _set_gun(env, seq)
+    return env
+
+
+def test_dealer_magnifier_then_acts_on_it():
+    # player's blank at the dealer passes the turn; the dealer looks, sees live, shoots the player
+    env = _dealer_setup(8, [BLANK, LIVE, BLANK, BLANK], dealer=["magnifying glass"], player=[])
+    _, _, _, info = env.step(SHOOT_DEALER)
+    assert info["events"][1:3] == ["dealer uses magnifying glass", "dealer shoots player: live"]
+
+
+def test_dealer_smokes_when_hurt_and_takes_your_item_with_adrenaline():
+    env = _dealer_setup(9, [BLANK, BLANK, LIVE, LIVE, LIVE], dealer=["adrenaline", "cigarettes"], player=["magnifying glass"])
+    env.s.hp_dealer = 3
+    _, _, _, info = env.step(SHOOT_DEALER)
+    ev = info["events"]
+    assert ev[1] == "dealer uses cigarettes" and env.s.hp_dealer >= 3
+    assert "dealer uses adrenaline and steals magnifying glass" in ev
+    assert env.s.items_player == [] and env.s.items_dealer == []

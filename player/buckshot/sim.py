@@ -1,7 +1,7 @@
 """Buckshot Roulette simulator — Double or Nothing (endless).
 
-v2: items for the player (draw, caps, all 9 effects, adrenaline steal); the dealer draws items but does
-not use them yet (next part). `items=False` gives the v1 rules (no items) for comparing old agents.
+v2: items for both sides (draw, caps, all 9 effects, adrenaline steal) and the dealer's item logic.
+`items=False` gives the v1 rules (no items) for comparing old agents.
 
 Holds the rules of the world only (ported from the game's scripts and scene data, see docs/sim-rules.md);
 the agent learns the strategy itself. The agent sees only `observation()`: public info and its own
@@ -33,7 +33,6 @@ GRID = 8                # item slots per side (ItemManager.gd: numberOfOccupiedG
 BATCHES_PER_CYCLE = 3   # RoundManager.gd:488 — after batch index 3 the prize and the double-or-nothing choice
 ROUND_SLOTS = 5         # round configs per batch (main.scn); loads after the 5th reuse the last one
 MAX_ROUNDS = 1000       # safety cap on rounds per game
-DEALER_USES_ITEMS = False  # TODO part 2: port DealerIntelligence.gd item logic
 
 
 def _flip(shell: str) -> str:
@@ -65,8 +64,9 @@ class State:
     last_shell: str | None = None  # public: the shell that just left the gun in this load
     player_knows: list[str | None] = field(default_factory=list)  # the agent's own knowledge per shell
     dealer_knows: list[bool] = field(default_factory=list)        # hidden from the agent
-    items_player: dict[str, int] = field(default_factory=dict)
-    items_dealer: dict[str, int] = field(default_factory=dict)
+    # Items in the order they were drawn: the dealer takes the first one a rule wants (DealerIntelligence.gd:144-201).
+    items_player: list[str] = field(default_factory=list)
+    items_dealer: list[str] = field(default_factory=list)
     saw: bool = False
     dealer_cuffed: bool = False
     dealer_breaks_free: bool = False  # cuffed dealer already skipped one turn
@@ -100,9 +100,9 @@ class BuckshotEnv:
         if s.awaiting_double:
             return [DOUBLE_YES, DOUBLE_NO]
         if s.stealing:
-            return [STEAL + i for i in ITEMS if s.items_dealer.get(i) and i != ADRENALINE and self._valid(i)]
+            return [STEAL + i for i in ITEMS if i in s.items_dealer and i != ADRENALINE and self._valid(i)]
         acts = [SHOOT_SELF, SHOOT_DEALER]
-        acts += [USE + i for i in ITEMS if s.items_player.get(i) and self._valid(i)]
+        acts += [USE + i for i in ITEMS if i in s.items_player and self._valid(i)]
         return acts
 
     def observation(self) -> dict:
@@ -125,8 +125,8 @@ class BuckshotEnv:
             obs.update({
                 "current_inverted": s.current_inverted,
                 "known_later": {i: k for i, k in enumerate(s.player_knows) if i > 0 and k is not None},
-                "items_player": {i: n for i, n in s.items_player.items() if n},
-                "items_dealer": {i: n for i, n in s.items_dealer.items() if n},
+                "items_player": {i: s.items_player.count(i) for i in ITEMS if i in s.items_player},
+                "items_dealer": {i: s.items_dealer.count(i) for i in ITEMS if i in s.items_dealer},
                 "saw": s.saw,
                 "dealer_cuffed": s.dealer_cuffed,
                 "player_cuffed": s.player_cuffed,
@@ -151,12 +151,12 @@ class BuckshotEnv:
         elif action.startswith(STEAL):
             item = action[len(STEAL):]
             s.stealing = False
-            s.items_dealer[item] -= 1
+            s.items_dealer.remove(item)
             self._log(f"player steals {item}")
             self._use_item("player", item)
         elif action.startswith(USE):
             item = action[len(USE):]
-            s.items_player[item] -= 1
+            s.items_player.remove(item)
             self._use_item("player", item)
         else:
             again = self._shoot("player", "self" if action == SHOOT_SELF else "dealer")
@@ -181,8 +181,8 @@ class BuckshotEnv:
         s.loads_in_batch = 0
         s.saw = False
         if clear_items:
-            s.items_player = {i: 0 for i in ITEMS}
-            s.items_dealer = {i: 0 for i in ITEMS}
+            s.items_player = []
+            s.items_dealer = []
         self._log(f"round {s.rounds_beat + 1} starts, HP {s.max_hp}")
         self._load()
 
@@ -208,13 +208,13 @@ class BuckshotEnv:
         s.dealer_knows = [False] * len(seq)
         self._log(f"load: {slot.live} live, {slot.blank} blank")
 
-    def _draw_items(self, hand: dict[str, int], count: int, no_saw: bool) -> None:
+    def _draw_items(self, hand: list[str], count: int, no_saw: bool) -> None:
         """ItemManager.GrabItem / GrabItems_Enemy: uniform among items below their cap, 8 slots max."""
         for _ in range(count):
-            if sum(hand.values()) >= GRID:
+            if len(hand) >= GRID:
                 return
-            pool = [i for i in ITEMS if hand[i] < ITEM_CAPS[i] and not (no_saw and i == HANDSAW)]
-            hand[self.rng.choice(pool)] += 1
+            pool = [i for i in ITEMS if hand.count(i) < ITEM_CAPS[i] and not (no_saw and i == HANDSAW)]
+            hand.append(self.rng.choice(pool))
 
     # --- rules: shots and turns -----------------------------------------------------------
 
@@ -282,9 +282,7 @@ class BuckshotEnv:
                     continue
                 s.dealer_cuffed = s.dealer_breaks_free = False
                 self._log("dealer breaks free")
-            target = self._dealer_choice()
-            again = self._shoot("dealer", target)
-            turn = "dealer" if again else "player"
+            turn = "dealer" if self._dealer_turn() else "player"
 
     # --- rules: items ---------------------------------------------------------------------
 
@@ -343,33 +341,137 @@ class BuckshotEnv:
             else:
                 self._log("phone: how unfortunate")
         elif item == ADRENALINE:
-            if any(s.items_dealer.get(i) and i != ADRENALINE and self._valid(i) for i in ITEMS):
+            if any(i != ADRENALINE and self._valid(i) for i in s.items_dealer):
                 s.stealing = True
             else:
                 self._log("nothing to steal")
 
     # --- the dealer -----------------------------------------------------------------------
 
-    def _dealer_choice(self) -> str:
-        """DealerIntelligence.gd shot choice: know the shell -> act on it, else majority colour."""
+    def _dealer_turn(self) -> bool:
+        """DealerIntelligence.BeginDealerTurn + DealerChoice (DealerIntelligence.gd:65-281): items, then a shot.
+
+        Returns True if the dealer goes again (blank at himself). If his beer empties the gun, returns False
+        and the caller reloads (the player moves first after a load)."""
         s = self.s
-        live = s.sequence.count(LIVE)  # the dealer counts the real shells (DealerIntelligence.gd:285-292)
+        using_medicine = using_saw = False
+        knows, known, target = False, None, None  # dealerKnowsShell, knownShell, dealerTarget: one turn only
+        while True:
+            if not s.sequence:
+                return False
+            if not knows and self._dealer_figures_out():
+                knows, known = True, s.sequence[0]
+                target = "self" if known == BLANK else "player"
+            if len(s.sequence) == 1:
+                knows, known = True, s.sequence[0]
+                target = "self" if known == BLANK else "player"
+            own = s.items_dealer
+            # With adrenaline in hand the dealer also considers the player's items (DealerIntelligence.gd:121-142).
+            pool = own + (s.items_player if ADRENALINE in own else [])
+            want = None
+            n = len(s.sequence)
+            for item in pool:
+                if item == MAGNIFIER and not knows and n != 1:
+                    want, knows, known = item, True, s.sequence[0]
+                    target = "self" if known == BLANK else "player"
+                    break
+                if item == CIGARETTES and s.hp_dealer < s.max_hp:
+                    want = item
+                    break
+                if item == MEDICINE and s.hp_dealer < s.max_hp and CIGARETTES not in pool and not using_medicine:
+                    if s.hp_dealer != 1:
+                        want, using_medicine = item, True
+                        break
+                if item == BEER and known != LIVE and n != 1:
+                    want, knows, known = item, False, None  # the target he had stays (DealerIntelligence.gd:170-176)
+                    break
+                if item == HANDCUFFS and not s.player_cuffed and n != 1:
+                    want = item
+                    break
+                if item == HANDSAW and not s.saw and known == LIVE:
+                    want, using_saw = item, True
+                    break
+                if item == PHONE and n > 2:
+                    want = item
+                    break
+                if item == INVERTER and knows and known == BLANK:
+                    want, known, target = item, LIVE, "player"
+                    break
+            if want is None and not using_saw and HANDSAW in pool and not s.saw and known != BLANK:
+                # DealerIntelligence.gd:205-215: coin flip — saw and shoot the player, or shoot himself
+                if self._coin_flip() == 0:
+                    target = "self"
+                else:
+                    want, target, using_saw = HANDSAW, "player", True
+            if want is None:
+                break
+            if want in own:
+                own.remove(want)
+            else:  # take it from the player with adrenaline (DealerIntelligence.gd:242-257)
+                own.remove(ADRENALINE)
+                s.items_player.remove(want)
+                self._log(f"dealer uses adrenaline and steals {want}")
+            self._log(f"dealer uses {want}")
+            self._dealer_item_effect(want)
+        if target is None:
+            target = "self" if self._coin_flip() == 0 else "player"  # ChooseWhoToShootRandomly
+        return self._shoot("dealer", target)
+
+    def _dealer_item_effect(self, item: str) -> None:
+        s = self.s
+        if item == CIGARETTES:
+            s.hp_dealer = min(s.max_hp, s.hp_dealer + 1)
+        elif item == MEDICINE:  # DealerIntelligence.gd:230-235, HealthCounter.gd:126-135
+            if self.rng.random() < 0.5:
+                s.hp_dealer = min(s.max_hp, s.hp_dealer + 2)
+                self._log("dealer medicine: +2")
+            else:
+                s.hp_dealer -= 1  # only taken at 2+ HP, so it can't kill him
+                self._log("dealer medicine: -1")
+        elif item == BEER:
+            self._log(f"beer ejects: {self._leave_gun()}")
+        elif item == HANDCUFFS:
+            s.player_cuffed, s.player_breaks_free = True, False
+        elif item == HANDSAW:
+            s.saw = True
+        elif item == PHONE:  # DealerIntelligence.gd:187-193
+            k = self.rng.randint(1, len(s.sequence) - 1)
+            if k == 8:
+                k -= 1
+            s.dealer_knows[k] = True
+        elif item == INVERTER:
+            s.sequence[0] = _flip(s.sequence[0])
+            s.current_inverted = not s.current_inverted
+            if s.player_knows[0] is not None:
+                s.player_knows[0] = _flip(s.player_knows[0])
+        # magnifier: only the dealer's knowledge for this turn (set by the caller)
+
+    def _dealer_figures_out(self) -> bool:
+        """FigureOutShell (DealerIntelligence.gd:282-303), endless mode: real counts + his phone memory."""
+        s = self.s
+        if s.dealer_knows[0]:
+            return True
+        live = s.sequence.count(LIVE)  # the dealer counts the real shells
         blank = len(s.sequence) - live
-        known = None
-        if s.dealer_knows[0] or len(s.sequence) == 1 or live == 0 or blank == 0:
-            known = s.sequence[0]
-        else:
-            mem_live = sum(1 for i, k in enumerate(s.dealer_knows) if k and s.sequence[i] == LIVE)
-            mem_blank = sum(1 for i, k in enumerate(s.dealer_knows) if k and s.sequence[i] == BLANK)
-            if live - mem_live == 0 or blank - mem_blank == 0:
-                known = s.sequence[0]  # FigureOutShell: the rest is fully determined
-        if known is not None:
-            return "self" if known == BLANK else "player"
-        if live > blank:  # CoinFlip in endless (DealerIntelligence.gd:421-431)
-            return "player"
+        if live == 0 or blank == 0:
+            return True
+        for i, k in enumerate(s.dealer_knows):
+            if k:
+                if s.sequence[i] == LIVE:
+                    live -= 1
+                else:
+                    blank -= 1
+        return live == 0 or blank == 0
+
+    def _coin_flip(self) -> int:
+        """CoinFlip in endless (DealerIntelligence.gd:421-431): 1 = player/saw if more live, 0 if more blank."""
+        live = self.s.sequence.count(LIVE)
+        blank = len(self.s.sequence) - live
+        if live > blank:
+            return 1
         if live < blank:
-            return "self"
-        return "self" if self.rng.randint(0, 1) == 0 else "player"
+            return 0
+        return self.rng.randint(0, 1)
 
     def _win_batch(self) -> None:
         s = self.s
