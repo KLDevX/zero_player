@@ -47,6 +47,7 @@ class State:
     sequence: list[str] = field(default_factory=list)   # hidden
     live_left: int = 0             # public: loaded counts minus shells seen leaving the gun
     blank_left: int = 0
+    last_shell: str | None = None  # public: the shell that just left the gun in this load (everyone sees it)
     player_knows: list[str | None] = field(default_factory=list)  # the agent's own knowledge per shell
     dealer_knows: list[bool] = field(default_factory=list)        # hidden from the agent
     awaiting_double: bool = False
@@ -92,6 +93,7 @@ class BuckshotEnv:
             "hp_dealer": s.hp_dealer,
             "live_left": s.live_left,
             "blank_left": s.blank_left,
+            "last_shell": s.last_shell,
             "known_current": s.player_knows[0] if s.player_knows else None,
         }
 
@@ -141,6 +143,7 @@ class BuckshotEnv:
         s.loads_in_batch += 1
         s.sequence = seq
         s.live_left, s.blank_left = live, blank
+        s.last_shell = None
         s.player_knows = [None] * total
         s.dealer_knows = [False] * total
         self._log(f"load: {live} live, {blank} blank")
@@ -155,6 +158,7 @@ class BuckshotEnv:
             s.live_left -= 1
         else:
             s.blank_left -= 1
+        s.last_shell = shell
         victim = shooter if target == "self" else ("dealer" if shooter == "player" else "player")
         self._log(f"{shooter} shoots {'self' if target == 'self' else victim}: {shell}")
         if shell == LIVE:
