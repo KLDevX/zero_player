@@ -74,20 +74,24 @@ class _Random:
 
 
 def checkpoints(eval_games: int) -> None:
-    contenders: list[tuple[str, object]] = [("random", _Random(EVAL_SEED))]
+    contenders: list[tuple[str, bool, object]] = [("random", False, _Random(EVAL_SEED)),
+                                                  ("random", True, _Random(EVAL_SEED))]
     for run_dir in sorted(p for p in RUNS.glob("*") if p.is_dir()):
+        meta_path = run_dir / "meta.json"
+        items = json.loads(meta_path.read_text(encoding="utf-8")).get("items", False) if meta_path.exists() else False
         for path in sorted(run_dir.glob("q_*.pkl"), key=lambda p: int(p.stem.split("_")[1])):
-            contenders.append((f"{run_dir.name}@{path.stem.split('_')[1]}", QTableAgent.load(path, seed=EVAL_SEED)))
-    if len(contenders) == 1:
+            contenders.append((f"{run_dir.name}@{path.stem.split('_')[1]}", items,
+                               QTableAgent.load(path, seed=EVAL_SEED)))
+    if len(contenders) == 2:
         return
     rows = []
-    for name, agent in contenders:
-        env = BuckshotEnv(seed=EVAL_SEED)
+    for name, items, agent in contenders:
+        env = BuckshotEnv(seed=EVAL_SEED, items=items)
         rounds = [play_game(env, agent, learn=False) for _ in range(eval_games)]
         mean, best, win = summarize(rounds)
-        rows.append([name, f"{mean:.3f}", best, f"{win:.1%}"])
+        rows.append([name, "yes" if items else "no", f"{mean:.3f}", best, f"{win:.1%}"])
     print(f"\nCHECKPOINTS vs the dealer (simulator, {eval_games} games each, exploration off, seed {EVAL_SEED})")
-    print(table(["agent", "rounds/game", "best game", "round win rate"], rows))
+    print(table(["agent", "items", "rounds/game", "best game", "round win rate"], rows))
 
 
 def real_games() -> None:

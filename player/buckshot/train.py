@@ -43,12 +43,13 @@ def main() -> None:
     ap.add_argument("--games", type=int, default=100_000)
     ap.add_argument("--run", default="q1")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--items", action="store_true", help="simulator with items (v2); default: v1 rules")
     args = ap.parse_args()
 
     run_dir = RUNS / args.run
     run_dir.mkdir(parents=True, exist_ok=True)
     REPORTS.mkdir(exist_ok=True)
-    env = BuckshotEnv(seed=args.seed)
+    env = BuckshotEnv(seed=args.seed, items=args.items)
     agent = QTableAgent(seed=args.seed, name=args.run)
     log_path = REPORTS / f"train_{args.run}.csv"
     t0 = time.perf_counter()
@@ -64,7 +65,7 @@ def main() -> None:
             window.append(rounds)
             if game in CHECKPOINTS or game == args.games:
                 path = run_dir / f"q_{game}.pkl"
-                agent.save(path, seed=args.seed, total_games=args.games)
+                agent.save(path, seed=args.seed, total_games=args.games, items=args.items)
                 print(f"checkpoint saved: {path.relative_to(ROOT)}")
             if game % max(1, args.games // 10) == 0:
                 mean = sum(window) / len(window)
@@ -73,7 +74,7 @@ def main() -> None:
                 window = []
     seconds = time.perf_counter() - t0
     meta = {"run": args.run, "games": args.games, "seed": args.seed, "training_seconds": round(seconds, 1),
-            "agent": "qtable", "sim": "v1 (no items)"}
+            "agent": "qtable", "items": args.items, "sim": "v2 (items)" if args.items else "v1 (no items)"}
     (run_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     print(f"done in {seconds:.1f} s; log: {log_path.relative_to(ROOT)}")
 
