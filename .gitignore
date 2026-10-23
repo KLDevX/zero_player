@@ -15,3 +15,6 @@ reports/*.jsonl
 game_lab/
 reports/*.log
 reports/*.png
+reports/*.txt
+reports/replays/
+reports/live_thoughts/
