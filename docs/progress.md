@@ -138,3 +138,13 @@ Part B (done): the bridge reports both new fields — `fired` (order of shells o
 known gap: a dealer adrenaline steal counts only the adrenaline). Checked live with d3.1: 104 decisions, no
 reading problems, phone read 5 of 5, dealer item uses seen for 8 item types; that game: **8 rounds survived**
 (best real game so far).
+
+## d4.1.0 trained (100k games, 29 min) — a step back
+Same 5 000 replay games (seed 7): **d4.1.0 3.35 rounds/game, 77.0% rounds won** vs d3.1 4.64 / 82.3%.
+Better than d3.1: saw on a 1-HP dealer 24% → 3%, beer on a known live 5% → 1%, the inverter tactic is
+finished 68 of 85 times (d3.1 56 of 111). Worse: cigarettes at full HP 12% → 46%, expired medicine at 1 HP
+23% → 47%, known live + saw in hand but shoots without it 0% → 45%. Learning curve (per tenth):
+0.23 0.36 0.58 0.91 1.58 2.28 2.39 2.52 2.48 2.55. It changed five things at once (reward, death −1, γ,
+n-step, observation), so the cause is unknown; one seed only, so luck is possible too.
+![results](img/v0.6-compare-results.png)
+![mistakes](img/v0.6-compare-mistakes.png)
