@@ -127,6 +127,9 @@ def main() -> None:
     # invert, shoot yourself with the now-blank shell, keep the turn.
     tactic = Counter()
     tactic_started = False
+    # Handcuffs timing (analysis only): when it cuffs, whether the cuffs paid off, and what happens when it holds them.
+    cuffs, cuff_context = Counter(), Counter()
+    cuff_pending = False
     decisions = 0
     best = (-1, 0)
     with (out / "thoughts.jsonl").open("w", encoding="utf-8") as tj:
@@ -175,9 +178,33 @@ def main() -> None:
                     ranked = sorted(t.values.items(), key=lambda kv: -kv[1]) if t.values else []
                     lines.append("  thinks: " + " · ".join(f"{a} {v:.2f}" for a, v in ranked))
                     lines.append(f"  → {t.choice}")
+                holding = "use:handcuffs" in legal and t.choice != "use:handcuffs"
+                if t.choice in ("use:handcuffs", "steal:handcuffs"):
+                    cuffs["cuffs used"] += 1
+                    cuff_pending = True
+                    dealer = obs.get("items_dealer", {})
+                    cuff_context["dealer had a saw"] += bool(dealer.get("handsaw"))
+                    cuff_context["dealer had a magnifier"] += bool(dealer.get("magnifying glass"))
+                    cuff_context["more lives than blanks"] += obs["live_left"] > obs["blank_left"]
+                    cuff_context["it knew the shell"] += bool(obs.get("known_current"))
                 obs, _, _, info = env.step(t.choice)
+                ev = info["events"]
+                if cuff_pending and t.choice not in ("use:handcuffs", "steal:handcuffs"):
+                    if "dealer is cuffed, skips the turn" in ev:
+                        cuffs["paid off: the dealer skipped a turn"] += 1
+                        cuff_pending = False
+                    elif any(e.startswith(("load:", "dealer dies", "player dies")) for e in ev):
+                        cuffs["wasted: the load or round ended first"] += 1
+                        cuff_pending = False
+                if holding:
+                    cuffs["moves holding cuffs without using them"] += 1
+                    if any(e == "dealer shoots player: live" for e in ev):
+                        cuffs["... and then the dealer shot it with a live"] += 1
                 if g <= args.logs:
                     lines += [f"     {e}" for e in info["events"]] + [""]
+            cuff_pending = False
+            if env.s.hp_player == 0 and "handcuffs" in env.s.items_player:
+                cuffs["died holding cuffs"] += 1
             rounds_all.append(env.s.rounds_beat)
             best = max(best, (env.s.rounds_beat, g))
             if g <= args.logs:
@@ -208,6 +235,10 @@ def main() -> None:
     md += ["", "## Chances it skipped", ""]
     md += [f"- {name}: {miss_hits[name]} of {miss_chances[name]} times ({miss_hits[name] / max(1, miss_chances[name]):.0%})"
            for name in missed]
+    md += ["", "## Handcuffs: timing and payoff", ""]
+    md += [f"- {k}: {v}" for k, v in cuffs.items()]
+    used = max(1, cuffs["cuffs used"])
+    md += [f"- when it cuffed — {k}: {v / used:.0%}" for k, v in cuff_context.items()]
     md += ["", "## Tactic: only lives left + inverter -> invert, shoot yourself, keep the turn", ""]
     md += [f"- {k}: {v}" for k, v in tactic.items()] or ["- (no chances)"]
     won = sum(rounds_all)
@@ -220,6 +251,7 @@ def main() -> None:
         "missed": {k: miss_hits[k] / max(1, miss_chances[k]) for k in missed},
         "combos": combos.most_common(10),
         "tactic_inverter": dict(tactic),
+        "handcuffs": dict(cuffs), "handcuffs_context": {k: v / used for k, v in cuff_context.items()},
     }
     (out / "stats.json").write_text(json.dumps(stats, ensure_ascii=False, indent=1), encoding="utf-8")
     (out / "tactics.md").write_text("\n".join(md) + "\n", encoding="utf-8")
