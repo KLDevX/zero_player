@@ -156,3 +156,18 @@ full HP + adrenaline: 65.9% vs 67.8%. So "no effect" was wrong for cigarettes. A
 the list instead of special-casing the dealer (that would hand the agent the dealer's rule): smoking at
 full HP now gives 0, the consequences teach the rest. The mistake board (for us only) still counts smoking
 at full HP as a mistake except in the denial case.
+
+## d4.2.3 (3 seeds × 32 tables, 100k games each, 22 min for all three)
+Same 5 000 replay games (seed 7, exploration off):
+| run | rounds/game | rounds won | best | cig at full HP | medicine at 1 HP | knows live + has saw, no saw | inverter tactic done |
+|---|---|---|---|---|---|---|---|
+| d3.1 (1 seed) | **4.64** | **82.3%** | 43 | 12% | 23% | 0% | 56 / 966 |
+| d4.1.0 (1 seed) | 3.35 | 77.0% | 33 | 46% | 47% | 45% | 68 / 722 |
+| d4.2.3-s0 | 3.81 | 79.2% | 45 | 26% | 43% | 29% | 54 / 896 |
+| d4.2.3-s1 | 3.42 | 77.4% | 31 | 39% | 36% | 21% | 48 / 654 |
+| d4.2.3-s2 | 3.23 | 76.3% | 27 | 33% | 36% | 35% | 33 / 676 |
+Seeds: mean 3.49, range 3.23–3.81 — luck moves a result by about ±0.3. d4.1.0 (3.35) sits inside that
+range, so d4.1 wasn't just unlucky, and the tables (method 2) don't seem to hurt. The v4 package as a whole
+is weaker than d3.1 here; d3.1 is a single seed, so its own luck is unknown too.
+![results](img/v0.7-compare-results.png)
+![mistakes](img/v0.7-compare-mistakes.png)
