@@ -98,3 +98,13 @@ saw on a known live shell. Still left: expired medicine at full HP (30%).
 ![moves](img/v0.5-compare-moves.png)
 ![mistakes](img/v0.5-compare-mistakes.png)
 ![learning curves](img/v0.5-learning-curves.png)
+
+## Real game: d3.1 through the overlay (2026-10-23, ×10)
+- Started with one command (`python -m player.buckshot.launch …`, see docs/how-to-run.md).
+- `livecheck` found phantom items: the game's own item counters (`amount_player`) go wrong after an
+  adrenaline steal, so in 8 of 44 decisions the agent "had" items that were no longer on the table. Fixed:
+  the bridge now counts the items lying on the table. After the fix: 151 decisions, no reading problems.
+- Games: before the fix 1, 1 rounds survived; after the fix 0, **5, 5** (mean 3.33; the simulator says
+  4.64 — only 3 games, too few to compare yet).
+- Magnifier: it uses it in 23% of the turns it has one on the real game and 25% in the simulator — its
+  style, not a reading error.

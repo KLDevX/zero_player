@@ -360,13 +360,18 @@ func _public() -> Dictionary:
 		var r = rm.roundArray[rm.currentRound]
 		# HP for the whole round comes from slot 0 (HealthCounter.gd:39-40)
 		load_info = {"max_hp": rm.roundArray[0].startingHealth, "loaded_live": r.amountLive, "loaded_blank": r.amountBlank}
+	# Count the items lying on the table, as the player sees them. The game's own counters (amount_player)
+	# go wrong after an adrenaline steal: the stolen item is subtracted twice (ItemInteraction.gd:84-86, 107-111).
 	var items_player := {}
 	var items_dealer := {}
-	for res in rm.amounts.array_amounts:
-		if res.amount_player > 0:
-			items_player[res.itemName] = res.amount_player
-		if res.amount_dealer > 0:
-			items_dealer[res.itemName] = res.amount_dealer
+	for c in rm.itemManager.itemSpawnParent.get_children():
+		if c.get_child_count() < 2:
+			continue
+		var b = c.get_child(1)
+		if b.get_script() == null or b.get_script().resource_path != BRANCH_PATH or b.itemName == "":
+			continue
+		var side: Dictionary = items_player if b.isPlayerSide else items_dealer
+		side[b.itemName] = side.get(b.itemName, 0) + 1
 	return {
 		"endless": rm.endless,
 		"batch": rm.playerData.currentBatchIndex,
