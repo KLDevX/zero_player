@@ -1,5 +1,9 @@
 # Progress log — versions of the player
 
+**Names (Akel, from d4 on): d‹idea›.‹tweak›.‹training method›** — the method digit: 0 = one seed, one table
+(as before); 1 = several seeds (`python -m player.buckshot.multiseed`); 2 = several tables at once
+(`train.py --tables 32`); 3 = both. Older runs (d1 … d3.1, d4.1) are method 0.
+
 Each version is a git tag (`git checkout <tag>` shows the code as it was) and its trained checkpoints are
 kept in `runs/archive/<tag>/` (local only, git-ignored). Numbers: simulator, 10 000 games, exploration off.
 

@@ -48,6 +48,11 @@ python -m tensorboard.main --logdir runs     # живые графики: отк
 Награды (`--shaping`): `none`, `hp_potential`, `hp_speed` (d3), `hp_events` (d2.1), `hp_events_items` (d3.1),
 `v4` (d4.x). Для d4.x ещё `--obs 2 --gamma 0.99 --n-step 3` (новое наблюдение, дисконт, n-step).
 `--seed 1` — другой случайный старт (чтобы проверить, что результат не везение).
+`--tables 32` — играть 32 партии сразу (≈ в 2 раза быстрее). Несколько seed'ов сразу:
+```
+python -m player.buckshot.multiseed --run d4.1.3 --seeds 0 1 2 -- --games 100000 --items --agent dqn --shaping v4 --obs 2 --gamma 0.99 --n-step 3 --tables 32
+```
+Названия: d‹идея›.‹правка›.‹способ›, способ 0 — как раньше, 1 — несколько seed'ов, 2 — несколько столов, 3 — оба.
 
 ## 5. Разобрать версию и нарисовать отчёты
 ```

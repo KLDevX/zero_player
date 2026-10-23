@@ -197,3 +197,13 @@ def test_dqn_n_step_returns():
     agent.learn(obs, legal[0], 2.0, obs, [], round_over=True)
     returns = [m[2] for m in agent.memory]
     assert np.allclose(returns, [0 + 0.5 * 1 + 0.25 * 2, 1 + 0.5 * 2, 2]) and all(m[5] for m in agent.memory)
+
+
+def test_training_on_several_tables_finishes_games():
+    from player.buckshot.dqn import DQNAgent
+    from player.buckshot.train import table_games
+
+    agent = DQNAgent(seed=16, obs_version=2, gamma=0.99, n_step=3, warmup=10**9)
+    envs = [BuckshotEnv(seed=16 * 1000 + i) for i in range(4)]
+    rounds = [r for _, r in zip(range(20), table_games(envs, agent, "v4", 20))]
+    assert len(rounds) == 20 and len(agent.pending) <= 4 and len(agent.memory) > 0

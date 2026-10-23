@@ -124,13 +124,27 @@ class DQNAgent:
         self.opt = torch.optim.Adam(self.net.parameters(), lr=lr)
         self.batch, self.learn_every, self.warmup, self.target_every = batch, learn_every, warmup, target_every
         self.memory: deque = deque(maxlen=memory)
-        self.pending: deque = deque()  # the last moves of the current round, for n-step targets
+        self.pending: dict[int, deque] = {}  # per table: the last moves of its current round (n-step targets)
         self.steps = 0
         self.last_loss = float("nan")
 
     def q_values(self, obs: dict) -> np.ndarray:
         with torch.no_grad():
             return self.net(torch.from_numpy(self.encode(obs))).numpy()
+
+    def think_batch(self, observations: list[dict], legals: list[list[str]]) -> list[Thought]:
+        """One network pass for many tables at once (training on several tables)."""
+        x = torch.from_numpy(np.stack([self.encode(o) for o in observations]))
+        with torch.no_grad():
+            q = self.net(x).numpy()
+        thoughts = []
+        for k, (obs, legal) in enumerate(zip(observations, legals)):
+            values = {a: float(q[k, ACTION_INDEX[a]]) for a in legal}
+            exploring = self.rng.random() < self.epsilon
+            choice = self.rng.choice(legal) if exploring else max(values, key=values.get)
+            thoughts.append(Thought(observation=obs, legal=legal, choice=choice, values=values, exploring=exploring,
+                                    agent=f"{self.name}@{self.games_trained}"))
+        return thoughts
 
     def think(self, observation: dict, legal: list[str]) -> Thought:
         q = self.q_values(observation)
@@ -144,25 +158,26 @@ class DQNAgent:
                        agent=f"{self.name}@{self.games_trained}")
 
     def learn(self, obs: dict, action: str, reward: float, next_obs: dict, next_legal: list[str],
-              round_over: bool) -> None:
+              round_over: bool, table: int = 0) -> None:
         done = round_over or not next_legal
-        self.pending.append((self.encode(obs), ACTION_INDEX[action], reward))
+        pending = self.pending.setdefault(table, deque())
+        pending.append((self.encode(obs), ACTION_INDEX[action], reward))
         if done:  # the round ended: every pending move gets its full discounted return, nothing after it
-            while self.pending:
-                self._push(np.zeros(len(self.features), dtype=np.float32), np.zeros(len(ACTIONS), dtype=bool), True)
-        elif len(self.pending) == self.n_step:
-            self._push(self.encode(next_obs), _mask(next_legal), False)
+            while pending:
+                self._push(pending, np.zeros(len(self.features), dtype=np.float32), np.zeros(len(ACTIONS), dtype=bool), True)
+        elif len(pending) == self.n_step:
+            self._push(pending, self.encode(next_obs), _mask(next_legal), False)
         self.steps += 1
         if len(self.memory) >= self.warmup and self.steps % self.learn_every == 0:
             self._train_batch()
         if self.steps % self.target_every == 0:
             self.target.load_state_dict(self.net.state_dict())
 
-    def _push(self, next_state: np.ndarray, next_mask: np.ndarray, done: bool) -> None:
+    def _push(self, pending: deque, next_state: np.ndarray, next_mask: np.ndarray, done: bool) -> None:
         """Store the oldest pending move with R = r0 + g*r1 + … and the discount to the state after them."""
-        ret = sum(self.gamma ** i * r for i, (_, _, r) in enumerate(self.pending))
-        disc = self.gamma ** len(self.pending)
-        s0, a0, _ = self.pending.popleft()
+        ret = sum(self.gamma ** i * r for i, (_, _, r) in enumerate(pending))
+        disc = self.gamma ** len(pending)
+        s0, a0, _ = pending.popleft()
         self.memory.append((s0, a0, ret, next_state, next_mask, done, disc))
 
     def _train_batch(self) -> None:

@@ -79,6 +79,27 @@ def play_game(env: BuckshotEnv, agent, learn: bool, shaping: str = "none") -> in
     return env.s.rounds_beat
 
 
+def table_games(envs: list, agent, shaping: str, total: int):
+    """Several tables at once: one network pass picks the moves for all of them; yields rounds per finished game."""
+    obs = [e.reset() for e in envs]
+    finished = 0
+    while finished < total:
+        agent.epsilon = epsilon_at(finished + 1, total)
+        legals = [e.legal_actions() for e in envs]
+        for k, (env, t) in enumerate(zip(envs, agent.think_batch(obs, legals))):
+            next_obs, reward, done, info = env.step(t.choice)
+            info["action"] = t.choice
+            round_over = reward > 0 or done
+            r = shaped_reward(shaping, obs[k], next_obs, reward, round_over, info)
+            agent.learn(obs[k], t.choice, r, next_obs, env.legal_actions(), round_over=round_over, table=k)
+            if done:
+                finished += 1
+                yield env.s.rounds_beat
+                obs[k] = env.reset()
+            else:
+                obs[k] = next_obs
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--games", type=int, default=100_000)
@@ -92,6 +113,8 @@ def main() -> None:
     ap.add_argument("--obs", type=int, choices=(1, 2), default=1, help="DQN observation version (2 = d4.x)")
     ap.add_argument("--gamma", type=float, default=1.0, help="DQN discount per move (d4.x: 0.99)")
     ap.add_argument("--n-step", type=int, default=1, help="DQN n-step returns (d4.x: 3)")
+    ap.add_argument("--tables", type=int, default=1,
+                    help="DQN: games played at once (one network pass for all); the batch grows with it")
     ap.add_argument("--key", choices=("basic", "full"), default="basic",
                     help="what the Q-table keys on: basic = HP + shells, full = the whole observation")
     args = ap.parse_args()
@@ -106,6 +129,10 @@ def main() -> None:
 
         from player.buckshot.dqn import DQNAgent
         agent = DQNAgent(seed=args.seed, name=args.run, obs_version=args.obs, gamma=args.gamma, n_step=args.n_step)
+        if args.tables > 1:
+            # Same number of samples looked at per move (batch / learn_every = 32), in bigger, rarer updates.
+            k = min(4, args.tables)
+            agent.batch, agent.learn_every = 128 * k, 4 * k
         writer = SummaryWriter(log_dir=str(run_dir / "tb"))
         prefix, ext = "dqn", "pt"
     else:
@@ -118,9 +145,16 @@ def main() -> None:
     with log_path.open("w", newline="", encoding="utf-8") as f:
         log = csv.writer(f)
         log.writerow(["game", "rounds_survived", "epsilon", "size"])
+        tables = None
+        if args.tables > 1:
+            envs = [BuckshotEnv(seed=args.seed * 1000 + i, items=args.items) for i in range(args.tables)]
+            tables = table_games(envs, agent, args.shaping, args.games)
         for game in range(1, args.games + 1):
-            agent.epsilon = epsilon_at(game, args.games)
-            rounds = play_game(env, agent, learn=True, shaping=args.shaping)
+            if tables is None:
+                agent.epsilon = epsilon_at(game, args.games)
+                rounds = play_game(env, agent, learn=True, shaping=args.shaping)
+            else:
+                rounds = next(tables)
             agent.games_trained = game
             size = len(agent.q) if args.agent == "qtable" else agent.steps
             log.writerow([game, rounds, round(agent.epsilon, 4), size])
@@ -151,7 +185,7 @@ def main() -> None:
     if args.agent == "qtable":
         meta["key"] = args.key
     else:
-        meta.update(obs=args.obs, gamma=args.gamma, n_step=args.n_step)
+        meta.update(obs=args.obs, gamma=args.gamma, n_step=args.n_step, tables=args.tables)
     (run_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     print(f"done in {seconds:.1f} s; log: {log_path.relative_to(ROOT)}")
 
