@@ -148,3 +148,11 @@ finished 68 of 85 times (d3.1 56 of 111). Worse: cigarettes at full HP 12% → 4
 n-step, observation), so the cause is unknown; one seed only, so luck is possible too.
 ![results](img/v0.6-compare-results.png)
 ![mistakes](img/v0.6-compare-mistakes.png)
+
+## d4.2 reward tweak (Akel): cigarettes off the "no effect" list
+Rollouts with d4.1 (300 tables × 10 each): smoking at full HP vs keeping the cigarettes — dealer hurt +
+adrenaline + no own cigarettes: 81.6% vs 81.6% rounds won (denying him the heal makes up for it); dealer at
+full HP + adrenaline: 65.9% vs 67.8%. So "no effect" was wrong for cigarettes. Akel chose to drop them from
+the list instead of special-casing the dealer (that would hand the agent the dealer's rule): smoking at
+full HP now gives 0, the consequences teach the rest. The mistake board (for us only) still counts smoking
+at full HP as a mistake except in the denial case.

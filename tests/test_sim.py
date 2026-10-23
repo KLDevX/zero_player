@@ -171,8 +171,8 @@ def test_info_and_waste_flags():
     assert info["new_info"] == 1 and info["wasted"] == 0
     _, _, _, info = env.step("use:magnifying glass")  # already known
     assert info["wasted"] == 1
-    _, _, _, info = env.step("use:cigarettes")  # full HP
-    assert info["wasted"] == 1 and info["d_hp_player"] == 0
+    _, _, _, info = env.step("use:cigarettes")  # full HP: not waste (option 2), simply no HP change
+    assert info["wasted"] == 0 and info["d_hp_player"] == 0
 
 
 def test_hp_changes_count_both_sides():
@@ -209,8 +209,8 @@ def test_training_on_several_tables_finishes_games():
     assert len(rounds) == 20 and len(agent.pending) <= 4 and len(agent.memory) > 0
 
 
-def test_smoking_at_full_hp_is_not_waste_when_the_dealer_could_steal_it():
-    env = _dealer_setup(17, [LIVE, BLANK, BLANK], dealer=["adrenaline"], player=["cigarettes"], hp=3)
-    env.s.hp_dealer = 2
-    _, _, _, info = env.step("use:cigarettes")
-    assert info["wasted"] == 0
+def test_smoking_at_full_hp_is_never_counted_as_waste():
+    for dealer in ([], ["adrenaline"]):
+        env = _dealer_setup(17, [LIVE, BLANK, BLANK], dealer=dealer, player=["cigarettes"], hp=3)
+        _, _, _, info = env.step("use:cigarettes")
+        assert info["wasted"] == 0 and info["d_hp_player"] == 0

@@ -43,8 +43,9 @@ def shaped_reward(shaping: str, obs: dict, next_obs: dict, reward: float, round_
     hp_events_items: hp_events and - 0.02 per item used or stolen (d3.1).
     v4:           - 1 for dying; + 0.1 * change of (my HP - dealer HP) inside the round (damage, healing,
                   medicine of both sides); + 0.02 per shell learned that wasn't known or deducible; - 0.05 per
-                  item used with no effect (full-HP healing, magnifier on a known shell, cuffs on the last
-                  shell, saw on a 1-HP dealer). Useful items and steals cost nothing (d4.x)."""
+                  item used with no effect at all (medicine at full HP, magnifier on a known shell, cuffs on
+                  the last shell, saw on a 1-HP dealer; not cigarettes since d4.2). Useful items and steals
+                  cost nothing (d4.x)."""
     if shaping == "none" or obs["phase"] == "double":
         return reward
     if shaping == "hp_potential":
