@@ -327,7 +327,8 @@ class BuckshotEnv:
         s = self.s
         self._log(f"{user} uses {item}")
         # bookkeeping for reward experiments: items with no effect, and new knowledge
-        if (item == CIGARETTES and s.hp_player == s.max_hp) or (item == MEDICINE and s.hp_player == s.max_hp) \
+        if (item == CIGARETTES and s.hp_player == s.max_hp and not self._dealer_could_steal_cigarettes()) \
+                or (item == MEDICINE and s.hp_player == s.max_hp) \
                 or (item == MAGNIFIER and self._player_can_tell_current()) \
                 or (item == HANDCUFFS and len(s.sequence) == 1) or (item == HANDSAW and s.hp_dealer == 1):
             s.step_wasted += 1
@@ -382,6 +383,12 @@ class BuckshotEnv:
                 s.stealing = True
             else:
                 self._log("nothing to steal")
+
+    def _dealer_could_steal_cigarettes(self) -> bool:
+        """Smoking at full HP still has an effect (Akel): a hurt dealer holding adrenaline and no cigarettes of
+        his own would take the player's cigarettes and heal (DealerIntelligence.gd:121-142, 152-156)."""
+        s = self.s
+        return ADRENALINE in s.items_dealer and s.hp_dealer < s.max_hp and CIGARETTES not in s.items_dealer
 
     def _player_can_tell_current(self) -> bool:
         """The player already knows the chambered shell, or can work it out from the counts and the phone."""

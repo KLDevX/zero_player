@@ -207,3 +207,10 @@ def test_training_on_several_tables_finishes_games():
     envs = [BuckshotEnv(seed=16 * 1000 + i) for i in range(4)]
     rounds = [r for _, r in zip(range(20), table_games(envs, agent, "v4", 20))]
     assert len(rounds) == 20 and len(agent.pending) <= 4 and len(agent.memory) > 0
+
+
+def test_smoking_at_full_hp_is_not_waste_when_the_dealer_could_steal_it():
+    env = _dealer_setup(17, [LIVE, BLANK, BLANK], dealer=["adrenaline"], player=["cigarettes"], hp=3)
+    env.s.hp_dealer = 2
+    _, _, _, info = env.step("use:cigarettes")
+    assert info["wasted"] == 0

@@ -81,7 +81,10 @@ def main() -> None:
     rounds_all = []
     # Moves that look wasteful (analysis only): description -> (item, test on the observation)
     suspicious = {
-        "cigarettes at full HP": ("cigarettes", lambda o: o["hp_player"] == o["max_hp"]),
+        # not counted when a hurt dealer with adrenaline and no cigarettes could steal them (smoking denies him)
+        "cigarettes at full HP": ("cigarettes", lambda o: o["hp_player"] == o["max_hp"] and not (
+            o.get("items_dealer", {}).get("adrenaline") and o["hp_dealer"] < o["max_hp"]
+            and not o.get("items_dealer", {}).get("cigarettes"))),
         "expired medicine at full HP (can only lose HP)": ("expired medicine", lambda o: o["hp_player"] == o["max_hp"]),
         "magnifier when it already knows the shell": ("magnifying glass", lambda o: o.get("known_current")),
         "handsaw when it knows the shell is blank": ("handsaw", lambda o: o.get("known_current") == "blank"),
