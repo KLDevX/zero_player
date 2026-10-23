@@ -87,19 +87,47 @@ def label(out: Path, games: int, seed: int, base: Path = BASE, samples: int = 16
     return n
 
 
+def double_lessons(n: int, value: float, seed: int = 0) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """The double-or-nothing question, which x1 doesn't label (nothing to calculate there). For our goal —
+    rounds survived — taking the money ends the game (0 more rounds); going on is worth about one more
+    round's chance to win (`value`, the mean of x1's best chances). Without these rows dx1.0 answered at
+    random, took the money and every game stopped after 3 rounds."""
+    from player.buckshot.planner import FastPolicy
+    from player.buckshot.sim import DOUBLE_NO, DOUBLE_YES
+    base = FastPolicy(BASE)
+    env = BuckshotEnv(seed=10_000 + seed)
+    xs = []
+    while len(xs) < n:
+        obs = env.reset()
+        while not env.done and len(xs) < n:
+            legal = env.legal_actions()
+            if DOUBLE_YES in legal:
+                xs.append(encode_v2(obs))
+            obs, *_ = env.step(base.choose(obs, legal))
+    m = np.zeros((n, len(ACTIONS)), dtype=bool)
+    y = np.zeros((n, len(ACTIONS)), dtype=np.float32)
+    m[:, ACTION_INDEX[DOUBLE_YES]] = m[:, ACTION_INDEX[DOUBLE_NO]] = True
+    y[:, ACTION_INDEX[DOUBLE_YES]] = value
+    return np.stack(xs), m, y
+
+
 def load_lessons(dirs: list[Path]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     xs, ms, ys = [], [], []
     for d in dirs:
         for p in sorted(d.glob("part_*.npz")):
             z = np.load(p)
             xs.append(z["x"]), ms.append(z["mask"]), ys.append(z["y"])
-    return np.concatenate(xs), np.concatenate(ms), np.concatenate(ys)
+    x, m, y = np.concatenate(xs), np.concatenate(ms), np.concatenate(ys)
+    best = np.where(m, y, -1).max(axis=1).mean()
+    dx, dm, dy = double_lessons(3000, float(best))
+    return np.concatenate([x, dx]), np.concatenate([m, dm]), np.concatenate([y, dy])
 
 
 # --- the network ----------------------------------------------------------------------------
 
 def train(dirs: list[Path], run: str, init: Path | None = None, epochs: int = 40, seed: int = 0) -> Path:
     """Fit the network to x1's chances (mean squared error on the legal moves only)."""
+    dirs = [Path(d).resolve() for d in dirs]
     x, m, y = load_lessons(dirs)
     rng = np.random.default_rng(seed)
     idx = rng.permutation(len(x))
