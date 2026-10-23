@@ -214,3 +214,27 @@ def test_smoking_at_full_hp_is_never_counted_as_waste():
         env = _dealer_setup(17, [LIVE, BLANK, BLANK], dealer=dealer, player=["cigarettes"], hp=3)
         _, _, _, info = env.step("use:cigarettes")
         assert info["wasted"] == 0 and info["d_hp_player"] == 0
+
+
+def test_planner_imagines_only_from_the_observation():
+    from player.buckshot.planner import imagine
+
+    a = _dealer_setup(18, [LIVE, BLANK, LIVE, BLANK], dealer=["beer"], player=["magnifying glass"])
+    b = _dealer_setup(18, [BLANK, LIVE, BLANK, LIVE], dealer=["beer"], player=["magnifying glass"])
+    assert a.observation() == b.observation()  # different hidden order, same view
+    ia, ib = imagine(a.observation(), random.Random(3)), imagine(b.observation(), random.Random(3))
+    assert ia.s.sequence == ib.s.sequence  # so the imagined tables can't depend on the real order
+
+
+def test_planner_keeps_what_the_player_knows():
+    from player.buckshot.planner import imagine
+
+    env = _dealer_setup(19, [LIVE, BLANK, BLANK, LIVE, BLANK], dealer=[], player=["magnifying glass", "inverter"])
+    env.step("use:magnifying glass")  # knows: live
+    env.step("use:inverter")          # now a blank, and it knows that
+    obs = env.observation()
+    for k in range(50):
+        s = imagine(obs, random.Random(k)).s
+        assert s.sequence[0] == BLANK and s.current_inverted
+        original = [s.sequence[0] == BLANK and LIVE or BLANK] + s.sequence[1:]
+        assert original.count(LIVE) == obs["live_left"] and original.count(BLANK) == obs["blank_left"]
