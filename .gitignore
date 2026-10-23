@@ -8,3 +8,5 @@ __pycache__/
 # Training outputs
 runs/
 *.pkl
+reports/*.db
+reports/*.csv
