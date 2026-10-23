@@ -172,7 +172,7 @@ def main() -> None:
     result = {"agent": agent.name, "base": agent.base_name, "games": n, "seed": args.seed,
               "rounds_per_game": won / n, "round_win_rate": won / (won + n), "best_game": max(rounds),
               "seconds": round(time.perf_counter() - t0, 1)}
-    out = ROOT / "reports" / f"x1_s{args.samples}_{n}games.json"
+    out = ROOT / "reports" / f"x1_s{args.samples}_{agent.base_name}_{n}games.json"
     out.write_text(json.dumps(result, indent=1), encoding="utf-8")
     print(json.dumps(result, indent=1))
 

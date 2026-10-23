@@ -18,3 +18,5 @@ reports/*.png
 reports/*.txt
 reports/replays/
 reports/live_thoughts/
+reports/distill/
+reports/*.json
