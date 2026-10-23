@@ -1,9 +1,12 @@
-"""Train the Q-table agent in the simulator.
+"""Train an agent in the simulator.
 
-    python -m player.buckshot.train --games 100000 --run q1
+    python -m player.buckshot.train --games 100000 --run q1                 # Q-table, no items
+    python -m player.buckshot.train --games 100000 --run d1 --items --agent dqn
 
-Saves frozen checkpoints to runs/<run>/q_<games>.pkl (after 100, 1 000, 10 000, 100 000 … games and at
-the end) while the main agent keeps learning, and logs every game to reports/train_<run>.csv.
+Saves frozen checkpoints to runs/<run>/ (q_<games>.pkl or dqn_<games>.pt after 100, 1 000, 10 000,
+100 000 … games and at the end) while the main agent keeps learning, and logs every game to
+reports/train_<run>.csv. DQN runs also write TensorBoard logs to runs/<run>/tb:
+    tensorboard --logdir runs
 """
 import argparse
 import csv
@@ -26,7 +29,7 @@ def epsilon_at(game: int, total: int) -> float:
     return EPS_START + (EPS_END - EPS_START) * progress
 
 
-def play_game(env: BuckshotEnv, agent: QTableAgent, learn: bool) -> int:
+def play_game(env: BuckshotEnv, agent, learn: bool) -> int:
     obs = env.reset()
     while not env.done:
         legal = env.legal_actions()
@@ -44,6 +47,7 @@ def main() -> None:
     ap.add_argument("--run", default="q1")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--items", action="store_true", help="simulator with items (v2); default: v1 rules")
+    ap.add_argument("--agent", choices=("qtable", "dqn"), default="qtable")
     ap.add_argument("--key", choices=("basic", "full"), default="basic",
                     help="what the Q-table keys on: basic = HP + shells, full = the whole observation")
     args = ap.parse_args()
@@ -52,31 +56,56 @@ def main() -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     REPORTS.mkdir(exist_ok=True)
     env = BuckshotEnv(seed=args.seed, items=args.items)
-    agent = QTableAgent(seed=args.seed, name=args.run, key=args.key)
+    writer = None
+    if args.agent == "dqn":
+        from torch.utils.tensorboard import SummaryWriter
+
+        from player.buckshot.dqn import DQNAgent
+        agent = DQNAgent(seed=args.seed, name=args.run)
+        writer = SummaryWriter(log_dir=str(run_dir / "tb"))
+        prefix, ext = "dqn", "pt"
+    else:
+        agent = QTableAgent(seed=args.seed, name=args.run, key=args.key)
+        prefix, ext = "q", "pkl"
     log_path = REPORTS / f"train_{args.run}.csv"
     t0 = time.perf_counter()
     window: list[int] = []
+    rolling: list[int] = []
     with log_path.open("w", newline="", encoding="utf-8") as f:
         log = csv.writer(f)
-        log.writerow(["game", "rounds_survived", "epsilon", "states_known"])
+        log.writerow(["game", "rounds_survived", "epsilon", "size"])
         for game in range(1, args.games + 1):
             agent.epsilon = epsilon_at(game, args.games)
             rounds = play_game(env, agent, learn=True)
             agent.games_trained = game
-            log.writerow([game, rounds, round(agent.epsilon, 4), len(agent.q)])
+            size = len(agent.q) if args.agent == "qtable" else agent.steps
+            log.writerow([game, rounds, round(agent.epsilon, 4), size])
             window.append(rounds)
+            rolling = (rolling + [rounds])[-1000:]
+            if writer and game % 500 == 0:
+                writer.add_scalar("rounds survived (last 1000 games)", sum(rolling) / len(rolling), game)
+                writer.add_scalar("epsilon", agent.epsilon, game)
+                writer.add_scalar("loss", agent.last_loss, game)
+            if writer and game % max(1, args.games // 20) == 0:
+                for pname, p in agent.net.named_parameters():
+                    writer.add_histogram(f"weights/{pname}", p.detach(), game)
             if game in CHECKPOINTS or game == args.games:
-                path = run_dir / f"q_{game}.pkl"
+                path = run_dir / f"{prefix}_{game}.{ext}"
                 agent.save(path, seed=args.seed, total_games=args.games, items=args.items)
-                print(f"checkpoint saved: {path.relative_to(ROOT)}")
+                print(f"checkpoint saved: {path.relative_to(ROOT)}", flush=True)
             if game % max(1, args.games // 10) == 0:
                 mean = sum(window) / len(window)
                 print(f"game {game:>8}: mean rounds survived {mean:.2f} (last {len(window)}), "
-                      f"epsilon {agent.epsilon:.2f}, states {len(agent.q)}")
+                      f"epsilon {agent.epsilon:.2f}, {'states' if args.agent == 'qtable' else 'steps'} {size}, "
+                      f"{time.perf_counter() - t0:.0f} s", flush=True)
                 window = []
     seconds = time.perf_counter() - t0
+    if writer:
+        writer.close()
     meta = {"run": args.run, "games": args.games, "seed": args.seed, "training_seconds": round(seconds, 1),
-            "agent": "qtable", "key": args.key, "items": args.items, "sim": "v2 (items)" if args.items else "v1 (no items)"}
+            "agent": args.agent, "items": args.items, "sim": "v2 (items)" if args.items else "v1 (no items)"}
+    if args.agent == "qtable":
+        meta["key"] = args.key
     (run_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     print(f"done in {seconds:.1f} s; log: {log_path.relative_to(ROOT)}")
 

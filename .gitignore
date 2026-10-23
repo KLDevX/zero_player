@@ -14,3 +14,4 @@ reports/*.jsonl
 # Modded copy of the game for live tests (game files, never commit)
 game_lab/
 reports/*.log
+reports/*.png

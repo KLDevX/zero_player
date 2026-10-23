@@ -133,3 +133,18 @@ def test_dealer_smokes_when_hurt_and_takes_your_item_with_adrenaline():
     assert ev[1] == "dealer uses cigarettes" and env.s.hp_dealer >= 3
     assert "dealer uses adrenaline and steals magnifying glass" in ev
     assert env.s.items_player == [] and env.s.items_dealer == []
+
+
+def test_dqn_encoder_covers_every_legal_action():
+    from player.buckshot.dqn import ACTION_INDEX, FEATURES, encode
+
+    rng = random.Random(10)
+    env = BuckshotEnv(seed=10)
+    for _ in range(200):
+        obs = env.reset()
+        while not env.done:
+            v = encode(obs)
+            assert len(v) == len(FEATURES) and 0.0 <= v.min() and v.max() <= 1.0
+            legal = env.legal_actions()
+            assert all(a in ACTION_INDEX for a in legal)
+            obs, *_ = env.step(rng.choice(legal))

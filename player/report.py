@@ -2,7 +2,7 @@
 
 1. Training runs (reports/train_<run>.csv): games, training time, rounds survived, best game, round win
    rate, progress over training.
-2. Checkpoints (runs/<run>/q_*.pkl) side by side with a random player: same simulator seed, exploration
+2. Checkpoints (runs/<run>/q_*.pkl, dqn_*.pt) side by side with a random player: same simulator seed, exploration
    off, same number of games.
 3. Games on the real game through the bridge (reports/games.csv).
 
@@ -82,6 +82,10 @@ def checkpoints(eval_games: int) -> None:
         for path in sorted(run_dir.glob("q_*.pkl"), key=lambda p: int(p.stem.split("_")[1])):
             contenders.append((f"{run_dir.name}@{path.stem.split('_')[1]}", items,
                                QTableAgent.load(path, seed=EVAL_SEED)))
+        for path in sorted(run_dir.glob("dqn_*.pt"), key=lambda p: int(p.stem.split("_")[1])):
+            from player.buckshot.dqn import DQNAgent
+            contenders.append((f"{run_dir.name}@{path.stem.split('_')[1]} (dqn)", items,
+                               DQNAgent.load(path, seed=EVAL_SEED)))
     if len(contenders) == 2:
         return
     rows = []
