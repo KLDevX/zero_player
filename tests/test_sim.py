@@ -154,3 +154,12 @@ def test_step_reports_hp_lost():
     env = _dealer_setup(11, [BLANK, LIVE, LIVE, LIVE], dealer=[], player=[], hp=4)
     _, _, _, info = env.step(SHOOT_DEALER)  # blank; the dealer sees 3 lives, shoots the player
     assert info["hp_lost"] >= 1 and env.s.hp_player == 4 - info["hp_lost"]
+
+
+def test_step_reports_damage_and_healing():
+    env = _dealer_setup(12, [LIVE, BLANK, BLANK], dealer=[], player=["cigarettes"], hp=4)
+    env.s.hp_player = 3
+    _, _, _, info = env.step("use:cigarettes")
+    assert info["hp_healed"] == 1
+    _, _, _, info = env.step("use:cigarettes") if "use:cigarettes" in env.legal_actions() else env.step(SHOOT_DEALER)
+    assert info["dealer_hit"] == 1

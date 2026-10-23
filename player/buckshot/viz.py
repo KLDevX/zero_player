@@ -61,7 +61,7 @@ def _stats(run: str) -> dict:
 
 def compare(runs: list[str]) -> list[Path]:
     stats = [_stats(r) for r in runs]
-    names = [s["agent"] for s in stats]
+    names = [s["agent"].split("@")[0] for s in stats]  # run names; all checkpoints shown are final
     colors = plt.cm.tab10(np.arange(len(stats)))
     outs = []
 
@@ -88,7 +88,7 @@ def compare(runs: list[str]) -> list[Path]:
     x = np.arange(len(actions))
     w = 0.8 / len(stats)
     for k, s in enumerate(stats):
-        ax.bar(x + k * w - 0.4 + w / 2, [s["use_rate"].get(a, 0) for a in actions], w, label=s["agent"], color=colors[k])
+        ax.bar(x + k * w - 0.4 + w / 2, [s["use_rate"].get(a, 0) for a in actions], w, label=names[k], color=colors[k])
     ax.set_xticks(x, [a.replace("use:", "").replace("steal:", "steal ") for a in actions], rotation=45, ha="right")
     ax.yaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(1.0))
     ax.set_title("How often it picks a move when that move is possible")
@@ -105,7 +105,7 @@ def compare(runs: list[str]) -> list[Path]:
     h = 0.8 / len(stats)
     for k, s in enumerate(stats):
         vals = [{**s["suspicious"], **s["missed"]}[c] for c in checks]
-        ax.barh(y + k * h - 0.4 + h / 2, vals, h, label=s["agent"], color=colors[k])
+        ax.barh(y + k * h - 0.4 + h / 2, vals, h, label=names[k], color=colors[k])
     ax.set_yticks(y, checks)
     ax.invert_yaxis()
     ax.xaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(1.0))

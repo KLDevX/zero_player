@@ -74,7 +74,9 @@ class State:
     player_breaks_free: bool = False
     stealing: bool = False
     awaiting_double: bool = False
-    hp_lost: int = 0               # player HP lost in this game (for reward experiments)
+    hp_lost: int = 0               # for reward experiments: player HP lost in this game,
+    dealer_hit: int = 0            # dealer HP lost to shots,
+    hp_healed: int = 0             # player HP really gained (cigarettes, medicine; capped at max)
 
 
 class BuckshotEnv:
@@ -140,7 +142,7 @@ class BuckshotEnv:
             raise ValueError(f"illegal action {action!r}; legal: {self.legal_actions()}")
         s = self.s
         self.events = []
-        rounds_before, lost_before = s.rounds_beat, s.hp_lost
+        rounds_before, lost_before, hit_before, healed_before = s.rounds_beat, s.hp_lost, s.dealer_hit, s.hp_healed
         if action == DOUBLE_NO:
             self._log("player takes the prize")
             self.done = True
@@ -164,7 +166,8 @@ class BuckshotEnv:
             self._end_turn(player_goes_again=again)
         reward = float(s.rounds_beat - rounds_before)
         info = {"events": self.events, "rounds_beat": s.rounds_beat, "cycles_beat": s.cycles_beat,
-                "hp_lost": s.hp_lost - lost_before}
+                "hp_lost": s.hp_lost - lost_before, "dealer_hit": s.dealer_hit - hit_before,
+                "hp_healed": s.hp_healed - healed_before}
         return self.observation(), reward, self.done, info
 
     # --- rules: rounds and loads ----------------------------------------------------------
@@ -248,6 +251,7 @@ class BuckshotEnv:
                 s.hp_lost += min(damage, s.hp_player)
                 s.hp_player = max(0, s.hp_player - damage)
             else:
+                s.dealer_hit += min(damage, s.hp_dealer)
                 s.hp_dealer = max(0, s.hp_dealer - damage)
             return False
         return target == "self"
@@ -315,11 +319,13 @@ class BuckshotEnv:
             s.player_knows[0] = s.sequence[0]
             self._log(f"magnifier: {s.sequence[0]}")
         elif item == CIGARETTES:
+            s.hp_healed += min(s.max_hp, s.hp_player + 1) - s.hp_player
             s.hp_player = min(s.max_hp, s.hp_player + 1)
         elif item == HANDSAW:
             s.saw = True
         elif item == MEDICINE:  # Medicine.UseMedicine: 50% lose 1, 50% heal 2 (capped)
             if self.rng.random() < 0.5:
+                s.hp_healed += min(s.max_hp, s.hp_player + 2) - s.hp_player
                 s.hp_player = min(s.max_hp, s.hp_player + 2)
                 self._log("medicine: +2")
             else:

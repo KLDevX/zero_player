@@ -38,7 +38,9 @@ def shaped_reward(shaping: str, obs: dict, next_obs: dict, reward: float, round_
     none:         just the goal.
     hp_potential: + 0.1 * change of (my HP - dealer HP) / max HP, potential 0 at the end of a round
                   (potential-based shaping: proven not to change which strategy is best).
-    hp_speed:     - 0.1 per HP the player lost, - 0.02 per action (faster wins pay more). Akel's test."""
+    hp_speed:     - 0.1 per HP the player lost, - 0.02 per action (faster wins pay more). Akel's test (d3).
+    hp_events:    - 0.1 per HP lost, + 0.1 per HP the dealer loses to a shot, + 0.1 per HP healed (d2.1).
+    hp_events_items: hp_events and - 0.02 per item used or stolen (d3.1)."""
     if shaping == "none" or obs["phase"] == "double":
         return reward
     if shaping == "hp_potential":
@@ -46,6 +48,11 @@ def shaped_reward(shaping: str, obs: dict, next_obs: dict, reward: float, round_
         return reward + 0.1 * (after - _potential(obs))
     if shaping == "hp_speed":
         return reward - 0.1 * info["hp_lost"] - 0.02
+    if shaping in ("hp_events", "hp_events_items"):
+        r = reward + 0.1 * (info["dealer_hit"] + info["hp_healed"] - info["hp_lost"])
+        if shaping == "hp_events_items" and info["action"].startswith(("use:", "steal:")):
+            r -= 0.02
+        return r
     raise ValueError(shaping)
 
 
@@ -55,6 +62,7 @@ def play_game(env: BuckshotEnv, agent, learn: bool, shaping: str = "none") -> in
         legal = env.legal_actions()
         action = agent.think(obs, legal).choice
         next_obs, reward, done, info = env.step(action)
+        info["action"] = action
         if learn:
             round_over = reward > 0 or done
             r = shaped_reward(shaping, obs, next_obs, reward, round_over, info)
@@ -70,7 +78,8 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--items", action="store_true", help="simulator with items (v2); default: v1 rules")
     ap.add_argument("--agent", choices=("qtable", "dqn"), default="qtable")
-    ap.add_argument("--shaping", choices=("none", "hp_potential", "hp_speed"), default="none",
+    ap.add_argument("--shaping", choices=("none", "hp_potential", "hp_speed", "hp_events", "hp_events_items"),
+                    default="none",
                     help="reward experiment on top of +1 per round won (see shaped_reward)")
     ap.add_argument("--key", choices=("basic", "full"), default="basic",
                     help="what the Q-table keys on: basic = HP + shells, full = the whole observation")

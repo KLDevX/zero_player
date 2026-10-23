@@ -11,7 +11,9 @@ kept in `runs/archive/<tag>/` (local only, git-ignored). Numbers: simulator, 10 
 | `v0.2-qtable-items` | 2026-10-23 | sim v2 (items, dealer items), Q-table on HP + shells, 300k games in 219 s | 1.52 | 60.4% |
 | `v0.3-dqn` | 2026-10-23 | sim v2, **DQN** (50 → 64 → 64 → 21), 100k games in 32 min | 3.56 | 78.1% |
 | `v0.4-reward-shaping` | 2026-10-23 | DQN d2: + HP potential (safe shaping) | 3.79 | 79.1% |
-| `v0.4-reward-shaping` | 2026-10-23 | DQN **d3** (Akel's reward): −0.1 per HP lost, −0.02 per action | **4.28** | **81.1%** |
+| `v0.4-reward-shaping` | 2026-10-23 | DQN d3 (Akel's reward): −0.1 per HP lost, −0.02 per action | 4.28 | 81.1% |
+| `v0.5-event-rewards` | 2026-10-23 | DQN d2.1: −0.1 per HP lost, +0.1 per dealer HP hit, +0.1 per HP healed | 3.93* | 79.7%* |
+| `v0.5-event-rewards` | 2026-10-23 | DQN **d3.1**: d2.1 + −0.02 per item used/stolen | **4.64*** | **82.3%*** |
 
 ## v0.1-qtable-no-items
 - Simulator: rounds, HP 2–4, loads 2–8, the dealer's item-free logic, and an "unshuffled loads" quirk that
@@ -75,3 +77,24 @@ decision is now logged to `reports/live_thoughts/` and checked by `python -m pla
 ![moves](img/v0.4-compare-moves.png)
 ![mistakes](img/v0.4-compare-mistakes.png)
 ![learning curves](img/v0.4-learning-curves.png)
+
+## v0.5-event-rewards (Akel's d2.1 and d3.1)
+Same network, simulator and seed; reward per event (`train.py --shaping hp_events | hp_events_items`).
+Numbers from the replays (5 000 games, seed 7, exploration off — rows marked * above; d1–d3 on the same
+replays: 3.51 / 3.80 / 4.44).
+| run | rounds/game | rounds won | moves/round | cigarettes at full HP | hurt, has cigarettes, doesn't smoke | knows live + has saw, shoots without |
+|---|---|---|---|---|---|---|
+| d1 | 3.51 | 77.8% | 11.5 | 32% | 82% | 3% |
+| d2 | 3.80 | 79.2% | 11.0 | 38% | 72% | 6% |
+| d3 | 4.44 | 81.6% | 9.8 | 53% | 89% | 22% |
+| d2.1 | 3.93 | 79.7% | 11.9 | 30% | 49% | 8% |
+| **d3.1** | **4.64** | **82.3%** | 10.6 | **12%** | **23%** | **0%** |
+
+d3.1 is the best so far **and** the cleanest: the heal bonus teaches it to smoke when hurt (23% skipped vs
+82–89%), the item cost stops it smoking at full HP (12%), and with no cost per shot it never skips the
+saw on a known live shell. Still left: expired medicine at full HP (30%).
+
+![results](img/v0.5-compare-results.png)
+![moves](img/v0.5-compare-moves.png)
+![mistakes](img/v0.5-compare-mistakes.png)
+![learning curves](img/v0.5-learning-curves.png)
