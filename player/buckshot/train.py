@@ -29,14 +29,36 @@ def epsilon_at(game: int, total: int) -> float:
     return EPS_START + (EPS_END - EPS_START) * progress
 
 
-def play_game(env: BuckshotEnv, agent, learn: bool) -> int:
+def _potential(obs: dict) -> float:
+    return (obs["hp_player"] - obs["hp_dealer"]) / obs["max_hp"]
+
+
+def shaped_reward(shaping: str, obs: dict, next_obs: dict, reward: float, round_over: bool, info: dict) -> float:
+    """Reward experiments (docs/progress.md). The goal stays the same: +1 per round won.
+    none:         just the goal.
+    hp_potential: + 0.1 * change of (my HP - dealer HP) / max HP, potential 0 at the end of a round
+                  (potential-based shaping: proven not to change which strategy is best).
+    hp_speed:     - 0.1 per HP the player lost, - 0.02 per action (faster wins pay more). Akel's test."""
+    if shaping == "none" or obs["phase"] == "double":
+        return reward
+    if shaping == "hp_potential":
+        after = 0.0 if round_over else _potential(next_obs)
+        return reward + 0.1 * (after - _potential(obs))
+    if shaping == "hp_speed":
+        return reward - 0.1 * info["hp_lost"] - 0.02
+    raise ValueError(shaping)
+
+
+def play_game(env: BuckshotEnv, agent, learn: bool, shaping: str = "none") -> int:
     obs = env.reset()
     while not env.done:
         legal = env.legal_actions()
         action = agent.think(obs, legal).choice
-        next_obs, reward, done, _ = env.step(action)
+        next_obs, reward, done, info = env.step(action)
         if learn:
-            agent.learn(obs, action, reward, next_obs, env.legal_actions(), round_over=reward > 0 or done)
+            round_over = reward > 0 or done
+            r = shaped_reward(shaping, obs, next_obs, reward, round_over, info)
+            agent.learn(obs, action, r, next_obs, env.legal_actions(), round_over=round_over)
         obs = next_obs
     return env.s.rounds_beat
 
@@ -48,6 +70,8 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--items", action="store_true", help="simulator with items (v2); default: v1 rules")
     ap.add_argument("--agent", choices=("qtable", "dqn"), default="qtable")
+    ap.add_argument("--shaping", choices=("none", "hp_potential", "hp_speed"), default="none",
+                    help="reward experiment on top of +1 per round won (see shaped_reward)")
     ap.add_argument("--key", choices=("basic", "full"), default="basic",
                     help="what the Q-table keys on: basic = HP + shells, full = the whole observation")
     args = ap.parse_args()
@@ -76,7 +100,7 @@ def main() -> None:
         log.writerow(["game", "rounds_survived", "epsilon", "size"])
         for game in range(1, args.games + 1):
             agent.epsilon = epsilon_at(game, args.games)
-            rounds = play_game(env, agent, learn=True)
+            rounds = play_game(env, agent, learn=True, shaping=args.shaping)
             agent.games_trained = game
             size = len(agent.q) if args.agent == "qtable" else agent.steps
             log.writerow([game, rounds, round(agent.epsilon, 4), size])
@@ -103,7 +127,7 @@ def main() -> None:
     if writer:
         writer.close()
     meta = {"run": args.run, "games": args.games, "seed": args.seed, "training_seconds": round(seconds, 1),
-            "agent": args.agent, "items": args.items, "sim": "v2 (items)" if args.items else "v1 (no items)"}
+            "agent": args.agent, "shaping": args.shaping, "items": args.items, "sim": "v2 (items)" if args.items else "v1 (no items)"}
     if args.agent == "qtable":
         meta["key"] = args.key
     (run_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")

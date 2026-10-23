@@ -74,6 +74,7 @@ class State:
     player_breaks_free: bool = False
     stealing: bool = False
     awaiting_double: bool = False
+    hp_lost: int = 0               # player HP lost in this game (for reward experiments)
 
 
 class BuckshotEnv:
@@ -139,7 +140,7 @@ class BuckshotEnv:
             raise ValueError(f"illegal action {action!r}; legal: {self.legal_actions()}")
         s = self.s
         self.events = []
-        rounds_before = s.rounds_beat
+        rounds_before, lost_before = s.rounds_beat, s.hp_lost
         if action == DOUBLE_NO:
             self._log("player takes the prize")
             self.done = True
@@ -162,7 +163,8 @@ class BuckshotEnv:
             again = self._shoot("player", "self" if action == SHOOT_SELF else "dealer")
             self._end_turn(player_goes_again=again)
         reward = float(s.rounds_beat - rounds_before)
-        info = {"events": self.events, "rounds_beat": s.rounds_beat, "cycles_beat": s.cycles_beat}
+        info = {"events": self.events, "rounds_beat": s.rounds_beat, "cycles_beat": s.cycles_beat,
+                "hp_lost": s.hp_lost - lost_before}
         return self.observation(), reward, self.done, info
 
     # --- rules: rounds and loads ----------------------------------------------------------
@@ -243,6 +245,7 @@ class BuckshotEnv:
         self._log(f"{shooter} shoots {'self' if target == 'self' else victim}: {shell}")
         if shell == LIVE:
             if victim == "player":
+                s.hp_lost += min(damage, s.hp_player)
                 s.hp_player = max(0, s.hp_player - damage)
             else:
                 s.hp_dealer = max(0, s.hp_dealer - damage)
@@ -320,6 +323,7 @@ class BuckshotEnv:
                 s.hp_player = min(s.max_hp, s.hp_player + 2)
                 self._log("medicine: +2")
             else:
+                s.hp_lost += 1
                 s.hp_player -= 1
                 self._log("medicine: -1")
                 if s.hp_player <= 0:

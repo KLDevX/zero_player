@@ -9,7 +9,9 @@ kept in `runs/archive/<tag>/` (local only, git-ignored). Numbers: simulator, 10 
 | `v0.1-qtable-no-items` | 2026-10-23 | sim v1 without items, Q-table, 100k games in 17 s | 2.73 | 73.2% |
 | — | 2026-10-23 | random player, **full rules with items** (sim v2) | 0.185 | 15.6% |
 | `v0.2-qtable-items` | 2026-10-23 | sim v2 (items, dealer items), Q-table on HP + shells, 300k games in 219 s | 1.52 | 60.4% |
-| `v0.3-dqn` | 2026-10-23 | sim v2, **DQN** (50 → 64 → 64 → 21), 100k games in 32 min | **3.56** | **78.1%** |
+| `v0.3-dqn` | 2026-10-23 | sim v2, **DQN** (50 → 64 → 64 → 21), 100k games in 32 min | 3.56 | 78.1% |
+| `v0.4-reward-shaping` | 2026-10-23 | DQN d2: + HP potential (safe shaping) | 3.79 | 79.1% |
+| `v0.4-reward-shaping` | 2026-10-23 | DQN **d3** (Akel's reward): −0.1 per HP lost, −0.02 per action | **4.28** | **81.1%** |
 
 ## v0.1-qtable-no-items
 - Simulator: rounds, HP 2–4, loads 2–8, the dealer's item-free logic, and an "unshuffled loads" quirk that
@@ -48,3 +50,28 @@ kept in `runs/archive/<tag>/` (local only, git-ignored). Numbers: simulator, 10 
 
 ![learning curves](img/v0.3-learning-curves.png)
 ![network](img/v0.3-network-d1.png)
+
+## v0.4-reward-shaping (Akel's experiment) + overlay v1
+Same network, simulator and seed as d1; only the reward changes (`train.py --shaping`).
+| run | reward on top of +1 per round won | rounds/game | rounds won | moves per round |
+|---|---|---|---|---|
+| d1 | — | 3.56 | 78.1% | 11.5 |
+| d2 | + 0.1 × change of (my HP − dealer HP) / max HP (potential-based) | 3.79 | 79.1% | 11.0 |
+| d3 | − 0.1 per HP lost, − 0.02 per action | **4.28** | **81.1%** | **9.8** |
+(5 000 games, exploration off; moves per round from the replays.)
+
+Why d3 wins (from the replays, `reports/replays/*/stats.json`): it is **faster** — 9.8 moves per round
+instead of 11.5, so the dealer gets fewer turns to draw items and hit back — and the HP penalty arrives
+on the very move that lost HP. It is *not* tidier with items: it wastes cigarettes at full HP more often
+(53% vs 32%), and the speed cost makes it skip the saw on a known live shell 22% of the time (d1 3%).
+Learning curves (per tenth): d3 0.23 0.35 0.60 1.08 2.24 3.51 3.46 3.43 3.41 3.39.
+
+Overlay v1 works on the lab copy: hint mode and play mode (see docs/overlay-design.md). First real games
+of d1 through it: 3 games, 1.33 rounds/game (too few to judge; Akel saw it skip cigarettes and beer — d1
+also rarely uses them in the simulator: beer 9%, cigarettes 15% of the time they are possible). Every live
+decision is now logged to `reports/live_thoughts/` and checked by `python -m player.buckshot.livecheck`.
+
+![results](img/v0.4-compare-results.png)
+![moves](img/v0.4-compare-moves.png)
+![mistakes](img/v0.4-compare-mistakes.png)
+![learning curves](img/v0.4-learning-curves.png)

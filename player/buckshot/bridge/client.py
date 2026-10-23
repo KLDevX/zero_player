@@ -31,5 +31,9 @@ class Bridge:
     def mute(self, on: bool = True) -> dict:
         return self._call(cmd="mute", on=on)
 
+    def window(self, mode: str = "borderless") -> dict:
+        """borderless | windowed — exclusive fullscreen would hide the overlay."""
+        return self._call(cmd="window", mode=mode)
+
     def close(self) -> None:
         self.sock.close()

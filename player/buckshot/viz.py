@@ -1,6 +1,7 @@
 """Pictures of training and of the network (matplotlib, saved to reports/*.png).
 
     python -m player.buckshot.viz curves                 # learning curves of all runs
+    python -m player.buckshot.viz compare d1 d2 d3          # side by side, from the replays' stats.json
     python -m player.buckshot.viz network runs/d1/dqn_100000.pt [--seed 3]
                                                          # the network: inputs → hidden → outputs,
                                                          # strongest weights, neurons lit for one situation
@@ -12,6 +13,7 @@ import json
 from pathlib import Path
 
 import matplotlib
+import matplotlib.ticker
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
@@ -48,6 +50,72 @@ def curves() -> Path:
     fig.tight_layout()
     fig.savefig(out, dpi=130)
     return out
+
+
+def _stats(run: str) -> dict:
+    hits = sorted((REPORTS / "replays").glob(f"{run}_*/stats.json"))
+    if not hits:
+        raise SystemExit(f"no replay stats for {run}: python -m player.buckshot.replay runs/{run}/<checkpoint>")
+    return json.loads(hits[-1].read_text(encoding="utf-8"))
+
+
+def compare(runs: list[str]) -> list[Path]:
+    stats = [_stats(r) for r in runs]
+    names = [s["agent"] for s in stats]
+    colors = plt.cm.tab10(np.arange(len(stats)))
+    outs = []
+
+    # 1. results
+    fig, axes = plt.subplots(1, 3, figsize=(13, 4.2))
+    for ax, key, title, fmt in zip(axes, ("rounds_per_game", "round_win_rate", "decisions_per_round"),
+                                   ("rounds survived per game", "rounds won", "moves per round (lower = faster)"),
+                                   ("{:.2f}", "{:.1%}", "{:.1f}")):
+        vals = [s[key] for s in stats]
+        bars = ax.bar(names, vals, color=colors)
+        ax.bar_label(bars, labels=[fmt.format(v) for v in vals], padding=3)
+        ax.set_title(title)
+        ax.set_ylim(0, max(vals) * 1.2)
+        ax.grid(axis="y", alpha=0.3)
+    fig.suptitle(f"Results in the simulator ({stats[0]['games']} games each, exploration off)")
+    fig.tight_layout()
+    outs.append(REPORTS / "compare_results.png")
+    fig.savefig(outs[-1], dpi=120)
+
+    # 2. how often each move is chosen when it is possible
+    actions = ["shoot_dealer", "shoot_self"] + sorted({a for s in stats for a in s["use_rate"] if a.startswith("use:")})
+    actions += sorted({a for s in stats for a in s["use_rate"] if a.startswith("steal:")})
+    fig, ax = plt.subplots(figsize=(14, 6))
+    x = np.arange(len(actions))
+    w = 0.8 / len(stats)
+    for k, s in enumerate(stats):
+        ax.bar(x + k * w - 0.4 + w / 2, [s["use_rate"].get(a, 0) for a in actions], w, label=s["agent"], color=colors[k])
+    ax.set_xticks(x, [a.replace("use:", "").replace("steal:", "steal ") for a in actions], rotation=45, ha="right")
+    ax.yaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(1.0))
+    ax.set_title("How often it picks a move when that move is possible")
+    ax.legend()
+    ax.grid(axis="y", alpha=0.3)
+    fig.tight_layout()
+    outs.append(REPORTS / "compare_moves.png")
+    fig.savefig(outs[-1], dpi=120)
+
+    # 3. suspicious moves and skipped chances
+    checks = list(stats[0]["suspicious"]) + list(stats[0]["missed"])
+    fig, ax = plt.subplots(figsize=(12, 5))
+    y = np.arange(len(checks))
+    h = 0.8 / len(stats)
+    for k, s in enumerate(stats):
+        vals = [{**s["suspicious"], **s["missed"]}[c] for c in checks]
+        ax.barh(y + k * h - 0.4 + h / 2, vals, h, label=s["agent"], color=colors[k])
+    ax.set_yticks(y, checks)
+    ax.invert_yaxis()
+    ax.xaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(1.0))
+    ax.set_title("Possible mistakes (share of the cases; lower is better)")
+    ax.legend()
+    ax.grid(axis="x", alpha=0.3)
+    fig.tight_layout()
+    outs.append(REPORTS / "compare_mistakes.png")
+    fig.savefig(outs[-1], dpi=120)
+    return outs
 
 
 def _example(seed: int):
@@ -121,12 +189,18 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="what", required=True)
     sub.add_parser("curves")
+    c = sub.add_parser("compare")
+    c.add_argument("runs", nargs="+")
     n = sub.add_parser("network")
     n.add_argument("checkpoint", type=Path)
     n.add_argument("--seed", type=int, default=3)
     args = ap.parse_args()
-    out = curves() if args.what == "curves" else network(args.checkpoint, args.seed)
-    print(f"saved {out.relative_to(ROOT)}")
+    if args.what == "compare":
+        outs = compare(args.runs)
+    else:
+        outs = [curves() if args.what == "curves" else network(args.checkpoint, args.seed)]
+    for out in outs:
+        print(f"saved {out.relative_to(ROOT)}")
 
 
 if __name__ == "__main__":

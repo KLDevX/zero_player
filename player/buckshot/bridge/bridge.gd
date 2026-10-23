@@ -21,6 +21,7 @@ const CURSOR_PATH := "res://scripts/CursorManager.gd"
 const MENU_PATH := "res://scripts/MenuManager.gd"
 const ITEMS_PATH := "res://scripts/ItemInteraction.gd"
 const TIMESCALE_PATH := "res://scripts/TimeScaleManager.gd"
+const PHONE_PATH := "res://scripts/BurnerPhone.gd"
 const BRANCH_PATH := "res://scripts/InteractionBranch.gd"
 # Clicks the bridge may make. Everything else (CRT, credits, heaven, menus) is left alone.
 const ALLOWED_ALIASES := [
@@ -48,6 +49,17 @@ var inbox := ""
 var target_scale := 1.0
 var observed_scale := 1.0  # time scale the last frame really ran at (before we set ours)
 var menu_started := false
+var phone: Node = null
+# What the player can know, tracked from what happens on screen (the same fields as the simulator's
+# observation): shells seen leaving the gun, inversions, the player's own magnifier and phone.
+var k_prev: Array = []        # the gun last frame
+var k_knows: Array = []       # per shell: "", "live" or "blank" — what the player has seen
+var k_inverted := false       # the chambered shell was flipped an odd number of times
+var k_last := ""              # the shell that last left the gun in this load
+var k_live := 0               # original colours still in the gun
+var k_blank := 0
+var k_anim := ""              # the player's hands animation last frame
+var k_phone_wait := false     # burner phone used: read its message
 
 
 func _ready() -> void:
@@ -82,6 +94,7 @@ func _process(_delta: float) -> void:
 		return
 	if rm == null:
 		return
+	_track_knowledge()
 	var state := {"public": _public(), "_hidden": _hidden()}
 	var key := JSON.stringify(state)
 	if key != last_state:
@@ -104,6 +117,9 @@ func _rescan() -> void:
 	menu = null
 	item_interaction = null
 	timescale_managers = []
+	phone = null
+	k_prev = []
+	k_knows = []
 	menu_started = false
 	if scene == null:
 		return
@@ -120,6 +136,7 @@ func _rescan() -> void:
 			MENU_PATH: menu = node
 			ITEMS_PATH: item_interaction = node
 			TIMESCALE_PATH: timescale_managers.append(node)
+			PHONE_PATH: phone = node
 	print("[bridge] scene ", scene.name, " rm=", rm != null, " im=", im != null, " menu=", menu != null)
 	_write({"event": "scene " + scene.name})
 
@@ -167,6 +184,13 @@ func _handle(msg: Dictionary) -> Dictionary:
 			return {"ok": true, "x": target_scale}
 		"mute":
 			AudioServer.set_bus_mute(0, bool(msg.get("on", true)))
+			return {"ok": true}
+		"window":
+			# Exclusive fullscreen (OptionsManager.gd:143) hides every other window; borderless lets an
+			# overlay sit on top. Lab copy only.
+			var modes := {"borderless": DisplayServer.WINDOW_MODE_FULLSCREEN,
+						  "windowed": DisplayServer.WINDOW_MODE_WINDOWED}
+			DisplayServer.window_set_mode(modes.get(str(msg.get("mode", "borderless")), DisplayServer.WINDOW_MODE_FULLSCREEN))
 			return {"ok": true}
 	return {"ok": false, "error": "unknown cmd"}
 
@@ -258,13 +282,84 @@ func _act(key: String) -> Dictionary:
 	return {"ok": true}
 
 
+
+# --- what the player can know -------------------------------------------------------------
+
+func _flip(shell: String) -> String:
+	return "blank" if shell == "live" else "live"
+
+
+func _track_knowledge() -> void:
+	var seq: Array = rm.shellSpawner.sequenceArray
+	if seq.size() > k_prev.size():
+		# a new load: the shells shown on the table are the public counts
+		var r = rm.roundArray[rm.currentRound]
+		k_knows = []
+		k_knows.resize(seq.size())
+		k_knows.fill("")
+		k_inverted = false
+		k_last = ""
+		k_live = r.amountLive
+		k_blank = r.amountBlank
+	elif seq.size() == k_prev.size() - 1 and k_prev.size() > 0:
+		# a shell left the gun (shot or beer); everyone sees its colour
+		var shell: String = k_prev[0]
+		var original: String = _flip(shell) if k_inverted else shell
+		if original == "live":
+			k_live -= 1
+		else:
+			k_blank -= 1
+		k_last = shell
+		k_inverted = false
+		if k_knows.size() > 0:
+			k_knows.pop_front()
+	elif seq.size() == k_prev.size() and seq.size() > 0 and seq[0] != k_prev[0] and seq.slice(1) == k_prev.slice(1):
+		# only the chambered shell changed: an inverter was used (by either side; both see it)
+		k_inverted = not k_inverted
+		if k_knows.size() > 0 and k_knows[0] != "":
+			k_knows[0] = _flip(k_knows[0])
+	var anim := ""
+	if item_interaction != null and item_interaction.animator_playerHands != null:
+		anim = item_interaction.animator_playerHands.current_animation
+	if anim != k_anim:
+		if anim == "player use magnifier" and seq.size() > 0 and k_knows.size() > 0:
+			k_knows[0] = seq[0]  # the player sees the chambered shell
+		if anim == "player use burner phone":
+			k_phone_wait = true
+	k_anim = anim
+	if k_phone_wait:
+		_read_phone(seq)
+	k_prev = seq.duplicate()
+
+
+# The phone's message names a position and a colour (BurnerPhone.gd:6-35); match it in the current language.
+func _read_phone(seq: Array) -> void:
+	if phone == null or phone.dia == null or phone.dia.dialogueUI == null:
+		k_phone_wait = false
+		return
+	var text: String = phone.dia.dialogueUI.text
+	if text == "" or not phone.dia.dialogueUI.is_visible_in_tree():
+		return
+	if text.begins_with(tr("UNFORTUNATE")):
+		k_phone_wait = false
+		return
+	for k in range(2, 8):
+		if text.begins_with(tr("SEQUENCE%d" % k)):
+			var idx := k - 1
+			var colour: String = "blank" if text.contains((tr("BLANKROUND") % "").strip_edges()) else "live"
+			if idx < k_knows.size():
+				k_knows[idx] = colour
+			k_phone_wait = false
+			return
+
 # --- state ----------------------------------------------------------------------------------
 
 func _public() -> Dictionary:
 	var load_info := {}
 	if rm.currentRound < rm.roundArray.size():
 		var r = rm.roundArray[rm.currentRound]
-		load_info = {"max_hp": r.startingHealth, "loaded_live": r.amountLive, "loaded_blank": r.amountBlank}
+		# HP for the whole round comes from slot 0 (HealthCounter.gd:39-40)
+		load_info = {"max_hp": rm.roundArray[0].startingHealth, "loaded_live": r.amountLive, "loaded_blank": r.amountBlank}
 	var items_player := {}
 	var items_dealer := {}
 	for res in rm.amounts.array_amounts:
@@ -289,7 +384,22 @@ func _public() -> Dictionary:
 		"don_cycles_beat": rm.double_or_nothing_rounds_beat,
 		"don_prize": rm.double_or_nothing_score,
 		"rounds_beat": rm.brief.ending.endless_roundsbeat,
+		"live_left": k_live,
+		"blank_left": k_blank,
+		"last_shell": k_last,
+		"current_inverted": k_inverted,
+		"known_current": k_knows[0] if k_knows.size() > 0 else "",
+		"known_later": _known_later(),
+		"stealing": item_interaction != null and item_interaction.stealing,
 	}
+
+
+func _known_later() -> Dictionary:
+	var later := {}
+	for i in range(1, k_knows.size()):
+		if k_knows[i] != "":
+			later[str(i)] = k_knows[i]
+	return later
 
 
 func _hidden() -> Dictionary:

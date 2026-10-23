@@ -87,6 +87,21 @@ def main() -> None:
         "handsaw when it knows the shell is blank": ("handsaw", lambda o: o.get("known_current") == "blank"),
     }
     sus_hits, sus_uses = Counter(), Counter()
+    # Chances it skipped (analysis only): description -> (was it a chance?, did it skip it?)
+    missed = {
+        "hurt, has cigarettes, doesn't smoke": (
+            lambda o, l: "use:cigarettes" in l and o["hp_player"] < o["max_hp"],
+            lambda c: c != "use:cigarettes"),
+        "knows it's live, has a saw, shoots without it": (
+            lambda o, l: o.get("known_current") == "live" and "use:handsaw" in l,
+            lambda c: c == "shoot_dealer"),
+        "knows it's blank, shoots the dealer (gives the turn away)": (
+            lambda o, l: o.get("known_current") == "blank" and o["live_left"] + o["blank_left"] > 1,
+            lambda c: c == "shoot_dealer"),
+    }
+    miss_hits, miss_chances = Counter(), Counter()
+    offered, chosen = Counter(), Counter()
+    decisions = 0
     best = (-1, 0)
     with (out / "thoughts.jsonl").open("w", encoding="utf-8") as tj:
         for g in range(1, args.games + 1):
@@ -97,6 +112,13 @@ def main() -> None:
                 t = agent.think(obs, legal)
                 tj.write(t.to_json() + "\n")
                 by_situation[situation(obs)][_kind(t.choice)] += 1
+                decisions += 1
+                offered.update(legal)
+                chosen[t.choice] += 1
+                for name, (is_chance, skipped) in missed.items():
+                    if is_chance(obs, legal):
+                        miss_chances[name] += 1
+                        miss_hits[name] += skipped(t.choice)
                 if t.choice.startswith(USE):
                     item_context[t.choice[len(USE):]][situation(obs)] += 1
                 if t.choice.startswith(STEAL):
@@ -148,6 +170,20 @@ def main() -> None:
     md += ["", "## Suspicious moves (places to improve)", ""]
     md += [f"- {name}: {sus_hits[name]} of {sus_uses[name]} uses ({sus_hits[name] / max(1, sus_uses[name]):.0%})"
            for name in suspicious]
+    md += ["", "## Chances it skipped", ""]
+    md += [f"- {name}: {miss_hits[name]} of {miss_chances[name]} times ({miss_hits[name] / max(1, miss_chances[name]):.0%})"
+           for name in missed]
+    won = sum(rounds_all)
+    stats = {
+        "agent": f"{args.checkpoint.parent.name}@{args.checkpoint.stem.split('_')[-1]}", "games": n, "seed": args.seed,
+        "rounds_per_game": won / n, "round_win_rate": won / (won + n), "best_game": best[0],
+        "decisions_per_round": decisions / (won + n),
+        "use_rate": {a: chosen[a] / offered[a] for a in offered},
+        "suspicious": {k: sus_hits[k] / max(1, sus_uses[k]) for k in suspicious},
+        "missed": {k: miss_hits[k] / max(1, miss_chances[k]) for k in missed},
+        "combos": combos.most_common(10),
+    }
+    (out / "stats.json").write_text(json.dumps(stats, ensure_ascii=False, indent=1), encoding="utf-8")
     (out / "tactics.md").write_text("\n".join(md) + "\n", encoding="utf-8")
     print("\n".join(md))
     print(f"\nlogs: {out.relative_to(ROOT)} (game_001.txt … game_{min(args.logs, n):03d}.txt, best game {best[1]})")

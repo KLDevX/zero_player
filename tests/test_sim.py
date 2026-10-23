@@ -148,3 +148,9 @@ def test_dqn_encoder_covers_every_legal_action():
             legal = env.legal_actions()
             assert all(a in ACTION_INDEX for a in legal)
             obs, *_ = env.step(rng.choice(legal))
+
+
+def test_step_reports_hp_lost():
+    env = _dealer_setup(11, [BLANK, LIVE, LIVE, LIVE], dealer=[], player=[], hp=4)
+    _, _, _, info = env.step(SHOOT_DEALER)  # blank; the dealer sees 3 lives, shoots the player
+    assert info["hp_lost"] >= 1 and env.s.hp_player == 4 - info["hp_lost"]

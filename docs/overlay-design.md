@@ -50,3 +50,24 @@ A hotkey toggles an "advanced" panel.
   click-through, always-on-top window). The game needs borderless-windowed mode for that.
 - Every Thought is also appended to the game's report, so a game can be replayed later ("why did it shoot
   itself here?") and checkpoints can be compared move by move.
+
+## Built: overlay v1 (2026-10-23) — lab copy with the bridge
+```
+python -m player.buckshot.overlay --agent runs/d1/dqn_100000.pt                          # hint mode
+python -m player.buckshot.overlay --agent runs/d1/dqn_100000.pt --mode play --speed 1 --pause 1.5
+```
+- `player/buckshot/overlay.py`: tkinter window, transparent and click-through (Win32 extended styles),
+  always on top. Top left: live/blank left, the chambered shell as far as the player knows (magnifier,
+  phone, inverter), last shell out, HP. Top right: the recommended move and "chance to win the round" (Q
+  of the move; shown as a chance only for agents trained with the plain reward), or the last move.
+  **F8** — all legal moves with their values and how it read the table; **F10** — quit.
+- The bridge switches the copy to borderless fullscreen: the game itself uses *exclusive* fullscreen
+  (`OptionsManager.gd:143`), which hides every other window.
+- `player/buckshot/live.py` builds the simulator's observation from the bridge. The bridge tracks the
+  player's own knowledge from what happens on screen: shells leaving the gun, inversions (only the
+  chambered shell changed), its magnifier (hands animation), its phone (the message, matched in the
+  current language). `_hidden` is never read in Python.
+- Play mode: the agent's move becomes clicks (`shoot_self` → `shotgun`, `text you`), each after the
+  clickable set has been stable for 0.6 s of game time; menu, pills, doors, waiver and item draw are
+  scripted. Every game (both modes) goes to `reports/games.csv`.
+- Not yet: the unmodified game (needs a screen reader), the network picture in the F8 panel.
