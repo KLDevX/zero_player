@@ -1,10 +1,10 @@
 extends Control
 # The AI's interface drawn inside the game (docs/ui-plan.md). The bridge owns this node and feeds it every
 # frame: `public` (what the player can know), `thought` (sent by Python), `ui` (AI on/off, mode, speed,
-# panels) and, only when cheats are on in developer mode, `cheat_order` (the real shell order; never sent to the
-# agent). Panels have fixed sizes, so nothing jumps when the text changes.
-#   top left: shells        top right: advice / the AI's move        middle left (I): all data
-#   bottom left (N): the network                                     bottom right (~): developer mode
+# panels) and, only with the developer command `cheat order`, `cheat_order` (the real shell order; on screen
+# only, never sent to the agent). Panels have fixed sizes, so nothing jumps when the text changes.
+#   top left: your shells (always at the table)      top right: the AI's card (only with [F1] on)
+#   middle left [I]: why it picks the move           bottom left [N]: the network      bottom right [~]: console
 # Drawn with _draw() in the game's own 960×540 frame, with its receipt font and shell colours.
 
 const FONT := "res://fonts/Fake Receipt Cyr Ver2_2.ttf"
@@ -16,19 +16,29 @@ const DIM := Color(0.6, 0.6, 0.57)
 const ACCENT := Color(1.0, 0.86, 0.45)
 const GOOD := Color(0.45, 0.9, 0.45)
 const BAD := Color(1.0, 0.35, 0.33)
-const OFF := Color(0.45, 0.45, 0.43)
-const UNKNOWN := Color(0.42, 0.42, 0.4)
+const OFF := Color(0.42, 0.42, 0.4)
+const UNKNOWN := Color(0.45, 0.45, 0.43)
 const CHEAT := Color(0.85, 0.45, 1.0)
-const BRASS := Color(0.85, 0.68, 0.3)
-const M := 12.0         # margin from the screen edge
+const BRASS := Color(0.83, 0.66, 0.3)
+const RIM := Color(0.35, 0.26, 0.12)
+const BAR_GREY := Color(0.62, 0.62, 0.6)
+const M := 12.0          # margin from the screen edge
 const PAD := 8.0
-const S := 12           # font sizes
-const SMALL := 10
-const BIG := 15
-const LEFT_W := 290.0
-const RIGHT_W := 350.0
+const S := 10            # font sizes
+const SMALL := 9
+const BIG := 12
+const LEFT_W := 250.0
+const RIGHT_W := 270.0
+const WHY_W := 400.0
+const ITEMS_W := 124.0  # the item table on the right of the why window
 const DEV_W := 430.0
 const NET_H := 128.0
+const SHELL_W := 5.0     # a 2D shell like the ones the game shows: flat top, coloured hull, brass base
+const SHELL_H := 13.0
+const SHELL_STEP := 9.0
+const SLIDE_SECONDS := 0.15
+const ITEMS := ["handcuffs", "beer", "magnifying glass", "cigarettes", "handsaw", "expired medicine", "inverter",
+				"burner phone", "adrenaline"]
 
 var bridge: Node = null
 var public: Dictionary = {}
@@ -43,6 +53,11 @@ var history_at := 0
 var models: Array = []
 var model_current := ""
 var font: Font
+var key_font: Font       # the receipt font draws "~" as a dash
+var ink := 1.0           # alpha of what is being drawn (the AI card fades while it waits)
+var card_t := 0.0        # 0 = card hidden, 1 = shown (slides in)
+var last_ms := 0
+var shown: Dictionary = {}  # the last thought with a move: stays on the card, faded, while the dealer plays
 
 
 func _ready() -> void:
@@ -51,13 +66,23 @@ func _ready() -> void:
 	# A variation, so the game's own font resource is never changed.
 	var f := FontVariation.new()
 	f.base_font = load(FONT)
-	var fallback = load(FALLBACK_FONT)
-	if fallback != null:
-		f.fallbacks = [fallback]
+	key_font = load(FALLBACK_FONT)
+	if key_font != null:
+		f.fallbacks = [key_font]
+	else:
+		key_font = f
 	font = f
 
 
 func _process(_delta: float) -> void:
+	# real time, not game time: the game may run at ×20
+	var now := Time.get_ticks_msec()
+	var dt := (now - last_ms) / 1000.0 if last_ms > 0 else 0.0
+	last_ms = now
+	var target := 1.0 if ui.get("ai_on", false) else 0.0
+	card_t = move_toward(card_t, target, dt / SLIDE_SECONDS)
+	if str(thought.get("move", "")) != "":
+		shown = thought
 	queue_redraw()
 
 
@@ -88,7 +113,7 @@ func _blank() -> Color:
 	return GlobalVariables.colorblind_color_blank if GlobalVariables.colorblind else GlobalVariables.default_color_blank
 
 
-func _shell(s: String) -> Color:
+func _shell_colour(s: String) -> Color:
 	return _live() if s == "live" else _blank()
 
 
@@ -96,8 +121,13 @@ func _flip(s: String) -> String:
 	return "blank" if s == "live" else "live"
 
 
+# The thought to explain: the current one, or the last move while the dealer plays (so panels don't blink).
+func _now() -> Dictionary:
+	return thought if str(thought.get("move", "")) != "" else shown
+
+
 func _name(item: String) -> String:
-	return str(thought.get("names", {}).get(item, item))
+	return str(thought.get("names", shown.get("names", {})).get(item, item))
 
 
 func _items(d: Dictionary) -> String:
@@ -140,25 +170,43 @@ func _order() -> Array:
 	var out := []
 	for i in range(n):
 		if known[i] != "":
-			out.append({"c": _shell(known[i]), "how": "seen"})
+			out.append({"c": _shell_colour(known[i]), "how": "seen"})
 		elif counted != "":
-			out.append({"c": _shell(_flip(counted) if i == 0 and inverted else counted), "how": "counted"})
+			out.append({"c": _shell_colour(_flip(counted) if i == 0 and inverted else counted), "how": "counted"})
 		else:
 			out.append({"c": null, "how": ""})
 	return out
 
 
-# --- drawing helpers -------------------------------------------------------------------------
+# --- drawing helpers (all of them use `ink`, so a whole panel can fade) ---------------------------
 
-func _box(r: Rect2, title := "") -> void:
-	draw_rect(r, PANEL)
-	draw_rect(r, EDGE, false, 1.0)
+func _ink(c: Color) -> Color:
+	return Color(c, c.a * ink)
+
+
+func _rect(r: Rect2, c: Color, filled := true) -> void:
+	draw_rect(r, _ink(c), filled, -1.0 if filled else 1.0)
+
+
+func _box(r: Rect2) -> void:
+	_rect(r, PANEL)
+	_rect(r, EDGE, false)
+
+
+func _width(text: String, size: int) -> float:
+	var w := 0.0
+	var parts := text.split("~")
+	for i in range(parts.size()):
+		w += font.get_string_size(parts[i], HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+		if i < parts.size() - 1:
+			w += key_font.get_string_size("~", HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+	return w
 
 
 func _fit(text: String, size: int, max_w: float) -> String:
-	if max_w <= 0 or font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x <= max_w:
+	if max_w <= 0 or _width(text, size) <= max_w:
 		return text
-	while text.length() > 1 and font.get_string_size(text + "…", HORIZONTAL_ALIGNMENT_LEFT, -1, size).x > max_w:
+	while text.length() > 1 and _width(text + "…", size) > max_w:
 		text = text.substr(0, text.length() - 1)
 	return text + "…"
 
@@ -167,61 +215,87 @@ func _lh(size: int) -> float:
 	return font.get_height(size) + 3.0
 
 
-# Draws text with its top at y; returns the width used.
+# Text with its top at y, in capitals (the receipt font is capitals only and draws some small letters
+# oddly); "~" comes from the fallback font. Returns the width used.
 func _text(x: float, y: float, text: String, size: int, c: Color, max_w := -1.0) -> float:
 	text = _fit(text.to_upper(), size, max_w)
-	draw_string(font, Vector2(x, y + font.get_ascent(size)), text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, c)
-	return font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+	var asc := font.get_ascent(size)
+	var px := x
+	var parts := text.split("~")
+	for i in range(parts.size()):
+		draw_string(font, Vector2(px, y + asc), parts[i], HORIZONTAL_ALIGNMENT_LEFT, -1, size, _ink(c))
+		px += font.get_string_size(parts[i], HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+		if i < parts.size() - 1:
+			draw_string(key_font, Vector2(px, y + asc), "~", HORIZONTAL_ALIGNMENT_LEFT, -1, size, _ink(c))
+			px += key_font.get_string_size("~", HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+	return px - x
 
 
 func _text_r(right: float, y: float, text: String, size: int, c: Color) -> void:
-	text = text.to_upper()
-	var w := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
-	_text(right - w, y, text, size, c)
+	_text(right - _width(text.to_upper(), size), y, text, size, c)
 
 
-# A shell standing on its brass end, like the ones shown on the table.
-func _pip(x: float, y: float, w: float, h: float, c, how := "seen", current := false) -> void:
-	if c == null:
-		draw_rect(Rect2(x, y, w, h * 0.78), UNKNOWN)
-	elif how == "counted":
-		draw_rect(Rect2(x + 0.5, y + 0.5, w - 1, h * 0.78 - 1), c, false, 1.0)
+# A shell as the game shows them: a flat-topped coloured hull with a light edge, a dark rim, a brass base.
+# how: "seen" (full colour), "counted" (darker: you know it by counting), "cheat" (pale, purple mark),
+# "" with c = null: unknown (grey).
+func _shell(x: float, y: float, c, how := "seen", current := false) -> void:
+	var hull: Color = UNKNOWN if c == null else c
+	if how == "counted":
+		hull = hull.darkened(0.45)
 	elif how == "cheat":
-		draw_rect(Rect2(x, y, w, h * 0.78), Color(c, 0.45))
-		draw_rect(Rect2(x + w * 0.3, y - 3, w * 0.4, 2), CHEAT)
-	else:
-		draw_rect(Rect2(x, y, w, h * 0.78), c)
-	draw_rect(Rect2(x, y + h * 0.78, w, h * 0.22), BRASS)
+		hull = Color(hull, 0.5)
+	var hull_h := SHELL_H * 0.68
+	_rect(Rect2(x, y, SHELL_W, hull_h), hull)
+	_rect(Rect2(x, y, 1, hull_h), hull.lightened(0.3))            # light edge
+	_rect(Rect2(x, y, SHELL_W, 1), hull.darkened(0.25))           # crimped top
+	_rect(Rect2(x, y + hull_h, SHELL_W, 1), RIM)                  # rim
+	_rect(Rect2(x, y + hull_h + 1, SHELL_W, SHELL_H - hull_h - 1), BRASS)
+	if how == "cheat":
+		_rect(Rect2(x + 1, y - 3, SHELL_W - 2, 2), CHEAT)
 	if current:
-		draw_rect(Rect2(x - 1, y + h + 2, w + 2, 2), ACCENT)
+		_rect(Rect2(x - 1, y + SHELL_H + 2, SHELL_W + 2, 2), ACCENT)
 
 
 func _hp(x: float, y: float, n: int, max_hp: int) -> float:
 	for i in range(max_hp):
-		draw_rect(Rect2(x + i * 8, y + 3, 6, 9), TEXT if i < n else Color(DIM, 0.3))
-	return max_hp * 8.0
+		_rect(Rect2(x + i * 7, y + 2, 5, 8), TEXT if i < n else Color(DIM, 0.3))
+	return max_hp * 7.0
 
 
-func _bar(x: float, y: float, w: float, frac: float, c: Color) -> void:
-	draw_rect(Rect2(x, y + 5, w, 4), Color(DIM, 0.3))
-	draw_rect(Rect2(x, y + 5, w * clampf(frac, 0.0, 1.0), 4), c)
+# A bar with an error bar |—| over its end: the spread of the neighbouring networks.
+func _bar(x: float, y: float, w: float, frac: float, c: Color, lo := -1.0, hi := -1.0, h := 4.0) -> void:
+	var by := y + 5
+	_rect(Rect2(x, by, w, h), Color(DIM, 0.22))
+	_rect(Rect2(x, by, w * clampf(frac, 0.0, 1.0), h), c)
+	if lo >= 0.0 and hi > lo + 0.002:
+		var x0 := x + w * clampf(lo, 0.0, 1.0)
+		var x1 := x + w * clampf(hi, 0.0, 1.0)
+		var mid := by + h * 0.5
+		var wc := Color(TEXT, 0.85)
+		_rect(Rect2(x0, mid - 0.5, x1 - x0, 1), wc)
+		_rect(Rect2(x0, by - 2, 1, h + 4), wc)
+		_rect(Rect2(x1 - 1, by - 2, 1, h + 4), wc)
 
 
 # --- panels ----------------------------------------------------------------------------------
 
 func _draw() -> void:
 	var vp := get_viewport_rect().size
+	ink = 1.0
 	var left_bottom := M
 	if not public.is_empty():
 		left_bottom = _left(Vector2(M, M))
-	_right(Vector2(vp.x - M - RIGHT_W, M))
-	var net_top := vp.y - M - NET_H
-	if ui.get("panel_n", false) and not thought.get("net", {}).is_empty():
+	if card_t > 0.0:
+		var slide := (1.0 - ease(card_t, 0.4)) * (RIGHT_W + M)
+		_card(Vector2(vp.x - M - RIGHT_W + slide, M))
+	ink = 1.0
+	var ai: bool = ui.get("ai_on", false)
+	var net_top := vp.y - M
+	if ai and ui.get("panel_n", false) and not _now().get("net", {}).is_empty():
+		net_top = vp.y - M - NET_H
 		_net(Rect2(M, net_top, LEFT_W, NET_H))
-	else:
-		net_top = vp.y - M
-	if ui.get("panel_i", false):
-		_info(left_bottom + 8, net_top - 8, vp)
+	if ai and ui.get("panel_i", false):
+		_why(left_bottom + 8, net_top - 8, vp)
 	if dev_open:
 		_dev(vp)
 
@@ -229,55 +303,57 @@ func _draw() -> void:
 func _left(at: Vector2) -> float:
 	var p := public
 	var lh := _lh(S)
-	var r := Rect2(at, Vector2(LEFT_W, PAD * 2 + lh * 7 + 6))
+	var row := maxf(lh, SHELL_H + 6)
+	var r := Rect2(at, Vector2(LEFT_W, PAD * 2 + _lh(SMALL) + row * 3 + lh * 3))
 	_box(r)
 	var x := at.x + PAD
-	var col := x + 104
+	var col := x + 84
+	var right := r.end.x - PAD
 	var y := at.y + PAD
 	_text(x, y, "ПАТРОНЫ", SMALL, DIM)
-	_text_r(r.end.x - PAD, y, "боевых: %d · холостых: %d" % [p.get("live_left", 0), p.get("blank_left", 0)], SMALL, TEXT)
-	y += lh
-	# 1) which shells are in the gun at all
-	_text(x, y, "в ружье:", S, DIM)
+	_text_r(right, y, "раунд %d · заряд %d" % [maxi(1, int(p.get("rounds_beat", 1))), int(p.get("load", 0)) + 1], SMALL, DIM)
+	y += _lh(SMALL)
+	# 1) which shells are in the gun at all; 2) their order — grey unknown, coloured known, darker counted,
+	# the yellow line under the chambered one; 3) the ones that left the gun. One size and step for all.
+	_text(x, y + 2, "в ружье:", S, DIM)
 	var px := col
 	for i in range(int(p.get("live_left", 0))):
-		_pip(px, y + 1, 7, 13, _live())
-		px += 10
+		_shell(px, y, _live())
+		px += SHELL_STEP
 	for i in range(int(p.get("blank_left", 0))):
-		_pip(px, y + 1, 7, 13, _blank())
-		px += 10
-	y += lh
-	# 2) their order: grey = unknown, coloured = known, outline = counted; the yellow line is the chamber
-	_text(x, y, "порядок:", S, DIM)
+		_shell(px, y, _blank())
+		px += SHELL_STEP
+	y += row
+	_text(x, y + 2, "порядок:", S, DIM)
 	var order := _order()
 	px = col
 	for i in range(order.size()):
 		var s: Dictionary = order[i]
 		if s["c"] == null and i < cheat_order.size():
-			_pip(px, y + 1, 9, 13, _shell(cheat_order[i]), "cheat", i == 0)
+			_shell(px, y, _shell_colour(cheat_order[i]), "cheat", i == 0)
 		else:
-			_pip(px, y + 1, 9, 13, s["c"], s["how"], i == 0)
-		px += 13
+			_shell(px, y, s["c"], s["how"], i == 0)
+		px += SHELL_STEP
 	if p.get("current_inverted", false):
-		_text(px + 4, y, "инвертор", SMALL, DIM)
+		_text(px + 4, y + 2, "инвертор", SMALL, DIM)
 	if not cheat_order.is_empty():
-		_text_r(r.end.x - PAD, y, "ЧИТ", SMALL, CHEAT)
-	y += lh + 6
-	_text(x, y, "вылетели:", S, DIM)
+		_text_r(right, y + 2, "чит", SMALL, CHEAT)
+	y += row
+	_text(x, y + 2, "вылетели:", S, DIM)
 	var fired: Array = p.get("fired", [])
 	px = col
 	for s in fired:
-		_pip(px, y + 2, 6, 11, _shell(s))
-		px += 9
+		_shell(px, y, _shell_colour(s))
+		px += SHELL_STEP
 	if fired.is_empty():
-		_text(col, y, "—", S, OFF)
-	y += lh
+		_text(col, y + 2, "—", S, OFF)
+	y += row
 	var max_hp := int(p.get("load_info", {}).get("max_hp", 0))
 	_text(x, y, "жизни:", S, DIM)
 	var w := _text(col, y, "ты ", S, DIM)
 	_hp(col + w, y, int(p.get("hp_player", 0)), max_hp)
-	w = _text(col + 70, y, "дилер ", S, DIM)
-	_hp(col + 70 + w, y, int(p.get("hp_dealer", 0)), max_hp)
+	w = _text(col + 66, y, "дилер ", S, DIM)
+	_hp(col + 66 + w, y, int(p.get("hp_dealer", 0)), max_hp)
 	y += lh
 	# cuffs: on the dealer = good for you (green), on you = red, none = grey
 	_text(x, y, "наручники:", S, DIM)
@@ -287,123 +363,167 @@ func _left(at: Vector2) -> float:
 		_text(col, y, "на тебе", S, BAD)
 	else:
 		_text(col, y, "нет", S, OFF)
-	_text(col + 96, y, "пила:", S, DIM)
-	if p.get("saw", false):
-		_text(col + 144, y, "да ×2", S, ACCENT)
-	else:
-		_text(col + 144, y, "нет", S, OFF)
+	_text(col + 84, y, "пила:", S, DIM)
+	_text(col + 124, y, "да ×2" if p.get("saw", false) else "нет", S, ACCENT if p.get("saw", false) else OFF)
 	y += lh
 	_text(x, y, "дилер брал:", S, DIM)
 	var used: Dictionary = p.get("dealer_used", {})
-	_text(col, y, _items(used), S, TEXT if not used.is_empty() else OFF, r.end.x - PAD - col)
+	_text(col, y, _items(used), S, TEXT if not used.is_empty() else OFF, right - col)
 	return r.end.y
 
 
-func _right(at: Vector2) -> void:
+# The AI's card: its move, the chance, the best moves as bars (yellow = its pick, grey = the next ones) with
+# the spread of the neighbouring networks as error bars. While the dealer plays it keeps the last move, faded.
+func _card(at: Vector2) -> void:
 	var lh := _lh(S)
-	var r := Rect2(at, Vector2(RIGHT_W, PAD * 2 + lh * 4 + _lh(BIG) + _lh(SMALL)))
+	var r := Rect2(at, Vector2(RIGHT_W, PAD * 2 + _lh(SMALL) * 3 + _lh(BIG) + 12 + lh * 2))
+	var waiting := str(thought.get("move", "")) == ""
+	var t: Dictionary = shown if waiting else thought
+	ink = 1.0
 	_box(r)
 	var x := at.x + PAD
+	var right := r.end.x - PAD
 	var inner := RIGHT_W - 2 * PAD
 	var y := at.y + PAD
-	var on: bool = ui.get("ai_on", false)
-	var mode := "ВЫКЛ — играешь ты"
-	if on:
-		mode = "АВТО" if ui.get("auto", false) else "ПОШАГОВО"
-	_text(x, y, "ИИ: " + mode, S, DIM)
-	_text_r(r.end.x - PAD, y, "×%s" % _num(ui.get("speed", 1.0)), S, DIM)
-	y += lh
-	var move: String = thought.get("move", "")
-	if move != "":
-		var w := _text(x, y, "ход ИИ: " if on else "совет: ", BIG, DIM)
-		_text(x + w, y, move, BIG, ACCENT, inner - w)
+	_text(x, y, "ИИ · " + ("АВТО" if ui.get("auto", false) else "ПОШАГОВО"), SMALL, DIM)
+	_text_r(right, y, "×%s" % _num(ui.get("speed", 1.0)), SMALL, DIM)
+	y += _lh(SMALL)
+	ink = 0.45 if waiting else 1.0
+	var bars: Array = t.get("bars", [])
+	if not bars.is_empty():
+		var best: Array = bars[0]
+		var move := str(t.get("move", best[0]))
+		var w := _text(x, y, move, BIG, ACCENT, inner - 50)
+		if t.has("steal"):
+			_text(x + w + 4, y + 2, "(" + str(t["steal"]) + ")", S, TEXT, inner - 50 - w - 4)
+		_text_r(right, y, str(best[4]), BIG, TEXT)
+		y += _lh(BIG)
+		_bar(x, y - 2, inner, float(best[1]), ACCENT, float(best[2]), float(best[3]), 5.0)
+		y += 12
+		for i in range(1, 3):
+			if i < bars.size():
+				var b: Array = bars[i]
+				_text(x, y, str(b[0]), S, DIM, 96)
+				_bar(x + 100, y, inner - 100 - 36, float(b[1]), BAR_GREY, float(b[2]), float(b[3]))
+				_text_r(right, y, str(b[4]), S, DIM)
+			y += lh
 	else:
 		_text(x, y, str(thought.get("status", "")), BIG, TEXT, inner)
-	y += _lh(BIG)
-	var ch = thought.get("chance")
-	if move != "" and ch != null:
-		var w := _text(x, y, "шанс выиграть раунд", S, DIM)
-		_bar(x + w + 8, y, inner - w - 8 - 40, float(ch), ACCENT)
-		_text_r(r.end.x - PAD, y, "%d%%" % roundi(100.0 * float(ch)), S, TEXT)
-	y += lh
-	var alts: Array = thought.get("alts", [])
-	if move != "" and not alts.is_empty():
-		var parts := []
-		for a in alts:
-			parts.append("%s %d%%" % [a[0], roundi(100.0 * float(a[1]))])
-		_text(x, y, "дальше: " + " · ".join(parts), S, DIM, inner)
-	y += lh
-	var note := ""
-	var note_c := DIM
-	if move != "" and thought.get("tie", false):
-		note = "ходы почти равны (разница < 1%)"
-	if on and not ui.get("auto", false) and move != "":
-		note = "→  сделать этот ход"
-		note_c = ACCENT
-	elif move != "" and str(thought.get("status", "")) != "":
-		note = str(thought["status"])
-	elif move == "" and str(thought.get("last", "")) != "":
-		note = "последний ход: " + str(thought["last"])
-	_text(x, y, note, S, note_c, inner)
-	y += lh
-	_text(x, y, "F1 ИИ  → ход  Пробел авто  Ctrl+1–4  I  N  Ё", SMALL, DIM, inner)
+		y += _lh(BIG) + 12 + lh * 2
+	ink = 1.0
+	if waiting:
+		var status := str(thought.get("status", ""))
+		_text(x, y, status if status != "" else "жду своего хода…", SMALL, DIM, inner)
+	elif ui.get("auto", false):
+		_text(x, y, "[пробел] пауза", SMALL, DIM, inner)
+	else:
+		_text(x, y, "[пробел] сделать ход", SMALL, ACCENT, inner)
+	y += _lh(SMALL)
+	_text(x, y, "[I] почему   [N] сеть   [~] консоль", SMALL, DIM, inner)
 
 
-func _info(top: float, bottom: float, vp: Vector2) -> void:
+# Why the network picks its move: what on this table pushed it up (green) or down (red) compared with a usual
+# table, grouped, with the coefficient in the move's units (points of the chance). Your and the dealer's
+# items at the bottom in small type.
+func _why(top: float, bottom: float, vp: Vector2) -> void:
 	var p := public
 	var lh := _lh(S)
-	var rows := 10
-	var h := PAD * 2 + lh * rows
+	var slh := _lh(SMALL)
+	var rows := 9
+	var h := PAD * 2 + slh * 2 + lh * rows
 	var y0 := clampf(vp.y * 0.5 - h * 0.5, top, maxf(top, bottom - h))
-	var r := Rect2(M, y0, LEFT_W, h)
+	var r := Rect2(M, y0, WHY_W, h)
 	_box(r)
 	var x := M + PAD
-	var inner := LEFT_W - 2 * PAD
+	var right := r.end.x - PAD - ITEMS_W - 10   # the reasons; the item table is to the right of them
+	var inner := right - x
 	var y := y0 + PAD
-	_text(x, y, "ВСЕ ДАННЫЕ", SMALL, DIM)
-	_text_r(r.end.x - PAD, y, "I", SMALL, DIM)
-	y += lh
-	var moves: Array = thought.get("all", [])
-	for i in range(5):
-		if i < moves.size():
-			var m: Array = moves[i]
-			var c := ACCENT if i == 0 else TEXT
-			_text(x, y, str(m[0]), S, c, 150)
-			if m[1] != null:
-				_bar(x + 156, y, inner - 156 - 40, float(m[1]), c)
-				_text_r(r.end.x - PAD, y, "%d%%" % roundi(100.0 * float(m[1])), S, c)
-		elif i == 0:
-			_text(x, y, "сейчас не твой ход", S, OFF)
-		y += lh
+	var w: Dictionary = _now().get("why", {})
+	var move := str(_now().get("move", ""))
+	_text(x, y, "почему «%s»" % move if move != "" else "почему", SMALL, DIM, inner - 20)
+	_text_r(r.end.x - PAD, y, "[I]", SMALL, DIM)
+	y += slh
+	var reasons: Array = w.get("reasons", [])
+	# group them: the strongest group first, inside a group the strongest reason first
+	var groups := {}
+	var order := []
+	for rr in reasons:
+		if not groups.has(rr[0]):
+			groups[rr[0]] = []
+			order.append(rr[0])
+		groups[rr[0]].append(rr)
+	var top_coef := 0.0001
+	for rr in reasons:
+		top_coef = maxf(top_coef, absf(float(rr[2])))
+	var listed := 0.0
+	var k := 0
+	var bar_x := x + 168
+	var half := 20.0
+	for g in order:
+		var first := true
+		for rr in groups[g]:
+			if k >= rows:
+				break
+			if first:
+				_text(x, y, str(g), SMALL, DIM, 70)
+			first = false
+			_text(x + 74, y, str(rr[1]), S, TEXT, 100)
+			var c := float(rr[2])
+			listed += c
+			var bar_len := half * absf(c) / top_coef
+			_rect(Rect2(bar_x + half, y + 3, 1, 8), Color(DIM, 0.5))
+			if c >= 0:
+				_rect(Rect2(bar_x + half + 1, y + 4, bar_len, 6), GOOD)
+			else:
+				_rect(Rect2(bar_x + half - bar_len, y + 4, bar_len, 6), BAD)
+			_text_r(right, y, "%+.2f" % c, S, GOOD if c >= 0 else BAD)
+			y += lh
+			k += 1
+	if reasons.is_empty():
+		_text(x, y, "сейчас не твой ход" if move == "" else "нет данных для этой модели", S, OFF, inner)
+	y = y0 + PAD + slh + lh * rows
+	if not w.is_empty():
+		# whatever didn't fit in the rows counts as "the rest", so the line always adds up
+		var rest: float = float(w.get("total", 0.0)) - float(w.get("base", 0.0)) - listed
+		_text(x, y, "обычный стол %.2f  + причины %+.2f  + прочее %+.2f  = %.2f" % [w.get("base", 0.0), listed, rest,
+			  w.get("total", 0.0)], SMALL, DIM, r.end.x - PAD - x)
+	# items, small: one row per item, your count and the dealer's
+	var ix := r.end.x - PAD - ITEMS_W
+	var iy := y0 + PAD
+	_rect(Rect2(ix - 6, iy, 1, slh + lh * rows - 4), Color(DIM, 0.25))
+	_text(ix, iy, "предмет", SMALL, DIM)
+	_text_r(ix + ITEMS_W - 30, iy, "ты", SMALL, DIM)
+	_text_r(ix + ITEMS_W, iy, "дил", SMALL, DIM)
+	iy += slh
 	if p.is_empty():
 		return
-	_text(x, y, "твои: " + _items(p.get("items_player", {})), S, TEXT, inner)
-	y += lh
-	_text(x, y, "у дилера: " + _items(p.get("items_dealer", {})), S, TEXT, inner)
-	y += lh
-	_text(x, y, "раунд %d · заряд %d · циклов DoN %d" % [maxi(1, int(p.get("rounds_beat", 1))),
-			int(p.get("load", 0)) + 1, int(p.get("don_cycles_beat", 0))], S, DIM, inner)
-	y += lh
-	_text(x, y, "модель: " + str(thought.get("agent", "—")), S, DIM, inner)
+	var step := lh * rows / ITEMS.size()
+	for i in range(ITEMS.size()):
+		var mine := int(p.get("items_player", {}).get(ITEMS[i], 0))
+		var theirs := int(p.get("items_dealer", {}).get(ITEMS[i], 0))
+		var cy := iy + i * step
+		_text(ix, cy, _name(ITEMS[i]), SMALL, TEXT if mine + theirs > 0 else OFF, ITEMS_W - 46)
+		_text_r(ix + ITEMS_W - 30, cy, str(mine), SMALL, TEXT if mine > 0 else OFF)
+		_text_r(ix + ITEMS_W, cy, str(theirs), SMALL, TEXT if theirs > 0 else OFF)
 
 
 func _net(r: Rect2) -> void:
 	_box(r)
-	var net: Dictionary = thought.get("net", {})
+	var net: Dictionary = _now().get("net", {})
 	var layers: Array = net.get("layers", [])
 	var x := r.position.x + PAD
 	_text(x, r.position.y + PAD, "НЕЙРОСЕТЬ", SMALL, DIM)
 	var sizes := []
 	for l in layers:
 		sizes.append(str(l.size()))
-	_text_r(r.end.x - PAD, r.position.y + PAD, " → ".join(sizes) + "   N", SMALL, DIM)
+	_text_r(r.end.x - PAD, r.position.y + PAD, " → ".join(sizes) + "   [N]", SMALL, DIM)
 	if layers.size() != 4:
 		return
 	var top := r.position.y + PAD + _lh(SMALL)
 	var area_h := r.end.y - PAD - top
 	# columns of dots: input, hidden 1, hidden 2, moves; brightness = how strongly it fires
 	var cols := [5, 4, 4, 1]
-	var xs := [x, x + 62, x + 112, x + 162]
+	var xs := [x, x + 56, x + 100, x + 144]
 	var pos := []
 	for li in range(4):
 		var vals: Array = layers[li]
@@ -430,30 +550,28 @@ func _net(r: Rect2) -> void:
 			draw_rect(Rect2(pos[li][i] - Vector2(1.5, 1.5), Vector2(3, 3)), c)
 	if choice >= 0:
 		var at: Vector2 = pos[3][choice]
-		_text(at.x + 8, at.y - 7, str(thought.get("move", "")), SMALL, ACCENT, r.end.x - PAD - at.x - 8)
+		_text(at.x + 8, at.y - 6, str(_now().get("move", "")), SMALL, ACCENT, r.end.x - PAD - at.x - 8)
 
 
 func _dev(vp: Vector2) -> void:
 	var lh := _lh(S)
-	var h := PAD * 2 + lh * (5 + 7)
+	var h := PAD * 2 + lh * (4 + 7 + 1)
 	var r := Rect2(vp.x - M - DEV_W, vp.y - M - h, DEV_W, h)
-	draw_rect(r, Color(0.02, 0.02, 0.02, 0.92))
-	draw_rect(r, ACCENT, false, 1.0)
+	_rect(r, Color(0.02, 0.02, 0.02, 0.92))
+	_rect(r, ACCENT, false)
 	var x := r.position.x + PAD
 	var inner := DEV_W - 2 * PAD
 	var y := r.position.y + PAD
 	_text(x, y, "РЕЖИМ РАЗРАБОТЧИКА", S, ACCENT)
-	_text_r(r.end.x - PAD, y, "Ё (~) — закрыть", SMALL, DIM)
+	_text_r(r.end.x - PAD, y, "[~] закрыть", SMALL, DIM)
 	y += lh
-	var boxes := [["F2", "panel_i", "I — все данные"], ["F3", "panel_n", "N — нейросеть"],
-				  ["F4", "cheat", "читы: виден порядок патронов"]]
-	for b in boxes:
+	for b in [["F2", "panel_i", "I — почему"], ["F3", "panel_n", "N — нейросеть"]]:
 		var on: bool = ui.get(b[1], false)
-		_text(x, y, "[%s] %s  %s" % ["x" if on else " ", b[0], b[2]], S, (CHEAT if b[1] == "cheat" else TEXT) if on else DIM)
+		_text(x, y, "[%s] [%s]  %s" % ["x" if on else " ", b[0], b[2]], S, TEXT if on else DIM)
 		y += lh
 	var w := _text(x, y, "модель: ", S, DIM)
-	_text(x + w, y, model_current if model_current != "" else "—", S, TEXT, inner - w - 110)
-	_text_r(r.end.x - PAD, y, "PgUp/PgDn сменить", SMALL, DIM)
+	_text(x + w, y, model_current if model_current != "" else "—", S, TEXT, inner - w - 120)
+	_text_r(r.end.x - PAD, y, "[PgUp] [PgDn] сменить", SMALL, DIM)
 	y += lh
 	for line in console_log:
 		_text(x, y, line, S, DIM, inner)

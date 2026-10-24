@@ -238,3 +238,18 @@ def test_planner_keeps_what_the_player_knows():
         assert s.sequence[0] == BLANK and s.current_inverted
         original = [s.sequence[0] == BLANK and LIVE or BLANK] + s.sequence[1:]
         assert original.count(LIVE) == obs["live_left"] and original.count(BLANK) == obs["blank_left"]
+
+
+def test_why_adds_up_and_uses_only_the_observation():
+    from player.buckshot.dqn import DQNAgent
+    from player.buckshot.explain import why
+
+    agent = DQNAgent(seed=0, obs_version=2)
+    base_x = agent.encode(BuckshotEnv(seed=5).reset()) * 0.5  # any reference table
+    env = _dealer_setup(20, [LIVE, BLANK, LIVE], dealer=["handsaw"], player=["magnifying glass"])
+    obs = env.observation()
+    w = why(agent, obs, SHOOT_DEALER, base_x)
+    listed = sum(r[2] for r in w["reasons"])
+    assert abs(w["base"] + listed + w["rest"] - w["total"]) < 0.01  # the reasons explain the whole value
+    other = _dealer_setup(20, [BLANK, LIVE, LIVE], dealer=["handsaw"], player=["magnifying glass"])
+    assert why(agent, other.observation(), SHOOT_DEALER, base_x) == w  # the hidden order changes nothing

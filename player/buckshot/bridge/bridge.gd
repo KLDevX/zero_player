@@ -15,8 +15,9 @@ extends Node
 #   {"cmd": "screenshot", "path": "C:/.../x.png"} -> saves the game's frame with the interface
 #   {"cmd": "key", "key": "F1", "ctrl": false} -> presses an interface key, as if typed (tests)
 # The state reply also carries "ui": AI on/off, auto or step mode, speed — set by the keys in the game:
-#   F1 AI on/off · → one move · Space auto/step · Ctrl+1…4 speed ×1/×3/×10/×20 · I all data · N network
-#   ~ developer mode: console, F2/F3 panels, F4 cheats (the real shell order, on screen only), PgUp/PgDn model
+#   F1 AI on/off · Space one move · Ctrl+Space auto/step · Ctrl+1…4 speed ×1/×3/×10/×20 · I why · N network
+#   F11 fullscreen ↔ windowed · ~ developer mode: console (help), F2/F3 panels, PgUp/PgDn model
+# The arrows are left to the game (they pick items with the keyboard).
 #   {"cmd": "dev_info", "models": [...], "current": "dx1.5@…"} -> the models the brain can load
 #   {"cmd": "dev_log", "text": "..."} -> a line in the developer console
 # Keys are matched by their place on the keyboard (physical), so they work in the Russian layout too.
@@ -79,11 +80,15 @@ var k_table_prev := {}        # {"player": {...}, "dealer": {...}} item counts o
 var hud_layer: CanvasLayer
 var hud: Control
 var ui := {"ai_on": false, "auto": false, "steps": 0, "panel_i": false, "panel_n": false, "cheat": false,
-		   "model_req": ""}
-const HELP := """model <имя> — сменить модель · models — список
-speed <x> · ai on|off · auto on|off
-i · n · cheat — панели и читы · mute · unmute · clear"""
-var window_fix_at := -1  # when to re-enter fullscreen (ms); -1 = not yet planned, 0 = done
+		   "model_req": "", "dev_changes": 0}
+const HELP := """model <имя> · models · speed <x> · ai on|off · auto on|off
+hp <n> · hp dealer <n> · kill dealer (в твой ход)
+shells live blank … · remove <предмет> [dealer]
+cheat order — видеть порядок патронов · i · n
+mute · unmute · clear"""
+const ITEM_NAMES := {"наручники": "handcuffs", "пиво": "beer", "лупа": "magnifying glass", "сигареты": "cigarettes",
+		"пила": "handsaw", "лекарство": "expired medicine", "инвертор": "inverter", "телефон": "burner phone",
+		"адреналин": "adrenaline"}
 
 
 func _ready() -> void:
@@ -123,7 +128,6 @@ func _process(_delta: float) -> void:
 				tsm.moving = false
 		Engine.time_scale = target_scale
 	hud.ui = _ui_state()
-	_keep_window()
 	if not _scene_ok():
 		hud.public = {}
 		_rescan()
@@ -149,8 +153,6 @@ func _rescan() -> void:
 	last_scan = now
 	scene = get_tree().current_scene
 	scene_id = scene.get_instance_id() if scene != null else 0
-	if window_fix_at == -1 and scene != null:
-		window_fix_at = now + 1000
 	branches = []
 	branches_ms = 0
 	rm = null
@@ -280,16 +282,13 @@ func _handle(msg: Dictionary) -> Dictionary:
 	return {"ok": false, "error": "unknown cmd"}
 
 
-# The game's exclusive fullscreen (OptionsManager.gd:143) can open shifted right and down, with part of the
-# picture off screen. Akel's fix: leave fullscreen and enter it again. Only once per game start, a second
-# after the first scene loads (the menu applies the game's window setting); windowed mode is left alone.
-func _keep_window() -> void:
-	if window_fix_at <= 0 or Time.get_ticks_msec() < window_fix_at:
-		return
-	window_fix_at = 0
-	if DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN:
+# F11: fullscreen ↔ windowed. The game's exclusive fullscreen (OptionsManager.gd:143) sometimes opens
+# shifted right and down; pressing F11 twice (windowed, then fullscreen again) puts it back (Akel's fix).
+func _toggle_fullscreen() -> void:
+	if DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_WINDOWED:
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN)
+	else:
 		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
-		DisplayServer.window_set_mode.call_deferred(DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN)
 
 
 func _set_speed(x: float) -> void:
@@ -300,11 +299,12 @@ func _set_speed(x: float) -> void:
 
 func _ui_state() -> Dictionary:
 	return {"ai_on": ui["ai_on"], "auto": ui["auto"], "steps": ui["steps"], "speed": target_scale,
-			"panel_i": ui["panel_i"], "panel_n": ui["panel_n"], "cheat": ui["cheat"], "model_req": ui["model_req"]}
+			"panel_i": ui["panel_i"], "panel_n": ui["panel_n"], "cheat": ui["cheat"], "model_req": ui["model_req"],
+			"dev_changes": ui["dev_changes"]}
 
 
 # Keys of the in-game interface (hud.gd passes every key press here first). Returns true if the key was ours,
-# so the game doesn't also act on it (arrows and Space move the game's controller cursor otherwise).
+# so the game doesn't also act on it. I and N work only with the AI on (they explain its move).
 func on_key(event: InputEventKey) -> bool:
 	if not event.pressed:
 		return false
@@ -327,20 +327,23 @@ func on_key(event: InputEventKey) -> bool:
 			ui["auto"] = false
 			ui["steps"] = 0
 			return true
-		KEY_I:
-			ui["panel_i"] = not ui["panel_i"]
+		KEY_F11:
+			_toggle_fullscreen()
 			return true
-		KEY_N:
-			ui["panel_n"] = not ui["panel_n"]
-			return true
-		KEY_RIGHT:
-			if ui["ai_on"] and not ui["auto"]:
-				ui["steps"] = 1
+		KEY_I, KEY_N:
+			if ui["ai_on"]:
+				var k := "panel_i" if key == KEY_I else "panel_n"
+				ui[k] = not ui[k]
 				return true
 		KEY_SPACE:
 			if ui["ai_on"]:
-				ui["auto"] = not ui["auto"]
-				ui["steps"] = 0
+				if event.ctrl_pressed:
+					ui["auto"] = not ui["auto"]
+					ui["steps"] = 0
+				elif ui["auto"]:
+					ui["auto"] = false  # Space during auto: stop and go on step by step
+				else:
+					ui["steps"] = 1
 				return true
 	return false
 
@@ -353,9 +356,6 @@ func _dev_key(event: InputEventKey, key: int) -> void:
 		KEY_F3:
 			if not event.echo:
 				ui["panel_n"] = not ui["panel_n"]
-		KEY_F4:
-			if not event.echo:
-				_console("cheat")
 		KEY_PAGEUP, KEY_PAGEDOWN:
 			if not hud.models.is_empty():
 				var i: int = hud.models.find(ui["model_req"] if ui["model_req"] != "" else hud.model_current.split("@")[0])
@@ -418,8 +418,17 @@ func _console(line: String) -> void:
 			ui[k] = (not ui[k]) if arg == "" else on
 			hud.log_line("панель %s %s" % [cmd.to_upper(), "вкл" if ui[k] else "выкл"])
 		"cheat":
-			ui["cheat"] = (not ui["cheat"]) if arg == "" else on
-			hud.log_line("читы " + ("вкл (видишь только ты, ИИ — нет)" if ui["cheat"] else "выкл"))
+			var last: String = words[words.size() - 1].to_lower() if words.size() > 1 else ""
+			ui["cheat"] = (not ui["cheat"]) if last in ["", "order"] else last != "off"
+			hud.log_line("порядок патронов " + ("виден (только тебе, ИИ — нет)" if ui["cheat"] else "скрыт"))
+		"hp":
+			_cmd_hp(words)
+		"kill":
+			_cmd_kill()
+		"shells":
+			_cmd_shells(words.slice(1))
+		"remove":
+			_cmd_remove(words.slice(1))
 		"mute", "unmute":
 			AudioServer.set_bus_mute(0, cmd == "mute")
 			hud.log_line("звук " + ("выкл" if cmd == "mute" else "вкл"))
@@ -427,6 +436,130 @@ func _console(line: String) -> void:
 			hud.console_log = []
 		_:
 			hud.log_line("неизвестная команда: " + cmd + " (help)")
+
+
+# --- developer commands that change the table (the game is then saved as «(dev)») ---------------
+
+func _at_table() -> bool:
+	if rm == null or not _scene_ok() or not rm.endless:
+		hud.log_line("только за столом (Double or Nothing)")
+		return false
+	return true
+
+
+func _your_turn() -> bool:
+	# while animations run the game's own code may be in the middle of something; only on your move
+	if not _at_table():
+		return false
+	if not rm.deskUI_shotgun.visible or (item_interaction != null and item_interaction.stealing):
+		hud.log_line("только в твой ход (когда можно взять ружьё)")
+		return false
+	return true
+
+
+func _cmd_hp(words: Array) -> void:
+	if not _at_table():
+		return
+	var dealer := words.has("dealer") or words.has("дилер")
+	var n := -1
+	for w in words:
+		if str(w).is_valid_int():
+			n = int(w)
+	if n < 1:
+		hud.log_line("hp <число> или hp dealer <число>")
+		return
+	var max_hp: int = rm.roundArray[0].startingHealth
+	n = clampi(n, 1, max_hp)  # the defibrillator display has no room for more
+	if dealer:
+		rm.health_opponent = n
+	else:
+		rm.health_player = n
+	rm.healthCounter.UpdateDisplay()
+	ui["dev_changes"] += 1
+	hud.log_line("%s: %d жизн." % ["дилер" if dealer else "ты", n])
+
+
+func _cmd_kill() -> void:
+	if not _your_turn():
+		return
+	# the same ending as a fatal shot: the table is closed, the dealer's HP hits 0, the round ends
+	item_interaction.DisablePermissions()
+	rm.health_opponent = 0
+	rm.healthCounter.UpdateDisplay()
+	rm.OutOfHealth("dealer")
+	ui["dev_changes"] += 1
+	hud.log_line("дилер убит")
+
+
+func _cmd_shells(words: Array) -> void:
+	if not _your_turn():
+		return
+	var seq: Array[String] = []
+	for w in words:
+		var x := str(w).to_lower()
+		if x in ["live", "l", "б", "боевой"]:
+			seq.append("live")
+		elif x in ["blank", "b", "х", "холостой"]:
+			seq.append("blank")
+		else:
+			hud.log_line("не понял «%s»: shells live blank live …" % x)
+			return
+	if seq.is_empty() or seq.size() > 8:
+		hud.log_line("от 1 до 8 патронов: shells live blank live")
+		return
+	rm.shellSpawner.sequenceArray = seq
+	var known: Array[bool] = []
+	known.resize(seq.size())
+	known.fill(false)
+	rm.dealerAI.sequenceArray_knownShell = known
+	# the new shells are public (you put them in): the counts are reset, nothing is known
+	k_prev = seq.duplicate()
+	k_knows = []
+	k_knows.resize(seq.size())
+	k_knows.fill("")
+	k_inverted = false
+	k_live = seq.count("live")
+	k_blank = seq.count("blank")
+	ui["dev_changes"] += 1
+	hud.log_line("патроны: %d боев. · %d холост." % [k_live, k_blank])
+
+
+func _cmd_remove(words: Array) -> void:
+	if not _your_turn():
+		return
+	var dealer := words.has("dealer") or words.has("дилер")
+	var item := ""
+	for w in words:
+		var x := str(w).to_lower()
+		if ITEM_NAMES.has(x):
+			item = ITEM_NAMES[x]
+		elif ITEM_NAMES.values().has(x):
+			item = x
+	if item == "":
+		hud.log_line("remove <предмет> [dealer], например remove лупа")
+		return
+	for c in rm.itemManager.itemSpawnParent.get_children():
+		if c.get_child_count() < 2:
+			continue
+		var b = c.get_child(1)
+		if b.get_script() == null or b.get_script().resource_path != BRANCH_PATH:
+			continue
+		if b.itemName != item or b.isPlayerSide == dealer:
+			continue
+		for res in rm.itemManager.amounts.array_amounts:
+			if res.itemName == item:
+				if dealer:
+					res.amount_dealer -= 1
+				else:
+					res.amount_player -= 1
+		if not dealer:
+			item_interaction.RemovePlayerItemFromGrid(c)  # frees its cell on the grid
+		c.queue_free()
+		k_table_prev = {}  # don't count it as the dealer using an item
+		ui["dev_changes"] += 1
+		hud.log_line("убрано: %s (%s)" % [item, "дилер" if dealer else "ты"])
+		return
+	hud.log_line("на столе нет: %s (%s)" % [item, "дилер" if dealer else "ты"])
 
 
 # Returns {action key: InteractionBranch node} for every click the player could make right now.

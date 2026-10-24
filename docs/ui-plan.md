@@ -1,4 +1,4 @@
-# In-game AI interface — plan (agreed with Akel 2026-10-24; step 1, I, N and developer mode built)
+# In-game AI interface — plan (agreed with Akel 2026-10-24; step 1, I, N and developer mode built, UX pass 3)
 
 Replaces the tkinter overlay: the bridge (a Godot autoload in the lab copy) draws the interface **inside the
 game** with the game's own fonts and colours; Python stays the brain (dx1.5 for fast play, x1 for hints)
@@ -8,9 +8,9 @@ and sends each thought to the bridge. Lab copy only, leaderboard off, single pla
 | key | action |
 |---|---|
 | **F1** | AI on/off. Off at start (you play). When switched on it starts in **step mode** |
-| **→** | step mode: the AI makes one move |
-| **Space** | auto (moves on its own) ↔ step mode |
-| **←** | browse back through the AI's earlier thoughts (the real game can't be rewound) |
+| **Space** | step mode: the AI makes one move (UX pass 3: the arrows are the game's, they pick items) |
+| **Ctrl+Space** | auto (moves on its own) ↔ step mode |
+| **←** | browse back through the AI's earlier thoughts — needs another key now (the arrows are the game's) |
 | **1–9** | step mode, "what if": pick another move, see the planner's chance for it, confirm to play it |
 | **Ctrl+1/2/3/4** | speed ×1 / ×3 / ×10 / ×20 |
 | **F8** | hint level: off → advice → full breakdown |
@@ -80,3 +80,27 @@ Later: the AI's voice (short spoken-style lines, then the conversation "brain" v
   mean "chance to win this round" — HP doesn't carry over, so with a certain win medicine, cigarettes and the
   shot were all ≈100% (1.007 vs 0.997, inside its noise). An AI fix (prefer the safe/fast move on ties) is
   for later; the interface now says when moves are tied.
+
+## Built: UX pass 3 (2026-10-24, Akel's notes)
+- Keys in square brackets everywhere: [F1], [Space] one move, [Ctrl+Space] auto, [Ctrl+1–4], [I], [N],
+  [F11] fullscreen ↔ windowed (press twice to fix the shifted picture; no automatic fix), [~] console (the
+  "~" is drawn with the fallback font, the receipt font has a dash there). The arrows go to the game.
+- [F1] scheme: off = a clean game with only the shell panel; on = the AI's card slides in (0.15 s, real
+  time) and starts step by step; while the dealer plays it keeps the last move faded. [I]/[N] only with
+  the AI on. F8 is no longer needed: step mode is the advice mode (you can play the move yourself).
+- 2D shells like the game's: flat-topped coloured hull, light edge, dark rim, brass base; one size and step
+  in all three rows; darker = known by counting; grey = unknown; yellow line = chamber.
+- Card: smaller type (10/12/9), the AI's move and chance, its bar yellow and the next two grey, each with
+  an error bar = the spread of the neighbouring networks on this table (`explain.siblings`: dx1.N-1,
+  dx1.N-2 or the other seeds). Adrenaline shows what it would take: «адреналин (лупа)»
+  (`explain.steal_target`, the agent asked about the steal phase in advance).
+- [I] "why": integrated gradients from the average table (`player/buckshot/explain.py`; the average of
+  the agent's own simulated decisions), reasons grouped (ЖИЗНИ, ПАТРОНЫ, ЗНАНИЕ, ТВОИ, У ДИЛЕРА, СТОЛ,
+  ИСТОРИЯ) with small diverging bars and the coefficient in chance points; the line
+  «обычный стол + причины + прочее = итог» adds up. Item table on the right, small: item · you · dealer.
+- Developer commands (only at the table; table-changing ones only on your move): `hp`, `hp dealer`,
+  `kill dealer` (closes the table and runs the game's own dealer-death ending), `shells` (also resets what
+  the player and the dealer know), `remove <item> [dealer]` (frees the grid cell like a used item),
+  `cheat order`. Games are saved as «(dev)» / «(cheats)»; dev commands are not counted as your moves.
+  `give` is not built (adding a 3D item to the table needs more work).
+- Tested on the game, muted: all of the above; `kill dealer` went on to round 2 without freezing.

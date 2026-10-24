@@ -3,10 +3,11 @@
     python -m player.buckshot.ingame --agent runs/dx1.5/dqn_991956.pt      (launch.py runs this for you)
 
 Reads the table through the bridge, asks the agent for its thought and sends it to the in-game panels.
-Keys in the game (handled by the bridge): F1 AI on/off (off at start: you play, it advises) · → one move in
-step mode · Space auto ↔ step · Ctrl+1…4 speed ×1/×3/×10/×20 · I all data · N the network ·
-~ developer mode (console, model switch, cheats that show the shell order on screen only — the agent never
-gets them).
+Keys in the game (handled by the bridge): [F1] AI on/off (off at start: a clean game, you play) ·
+[Space] one move in step mode (or you play it yourself: it then thinks again) · [Ctrl+Space] auto ↔ step ·
+[Ctrl+1…4] speed ×1/×3/×10/×20 · [I] why · [N] the network · [F11] fullscreen ↔ windowed ·
+[~] developer mode (console: model, hp, kill dealer, shells, remove, cheat order — the shell order is shown
+on screen only, the agent never gets it).
 With the AI on it also walks the menus (pills, doors, waiver). Every decision is logged to
 reports/live_thoughts/, every game to reports/games.csv with who played it.
 """
@@ -24,6 +25,7 @@ import torch
 
 from player.buckshot.bridge.client import Bridge
 from player.buckshot.dqn import ACTION_INDEX
+from player.buckshot.explain import average_table, is_adrenaline, siblings, steal_target, why
 from player.buckshot.live import LiveGame
 from player.buckshot.replay import load_agent
 from player.buckshot.testbot import choose, save_game
@@ -37,7 +39,7 @@ NAMES = {
     "burner phone": "телефон", "adrenaline": "адреналин",
 }
 
-SHORT = {"shoot_self": "в себя", "shoot_dealer": "в дилера"}  # for the one-line list of next moves
+SHORT = {"shoot_self": "в себя", "shoot_dealer": "в дилера"}  # bar labels are narrow
 
 
 def say(action: str) -> str:
@@ -48,7 +50,7 @@ def say(action: str) -> str:
     return NAMES.get(action, action)
 
 
-TIE = 0.01  # moves this close to the best one are "almost equal" (dx's values are noisy by about that much)
+BARS = 3  # moves on the right card: the best one (yellow) and the next two (grey)
 EDGES = 24  # strongest connections drawn per layer on the N panel
 
 
@@ -80,6 +82,10 @@ class Brain:
         # Q is a chance to win the round only with the plain reward (+1 per round won) and for dx (x1's chances).
         self.q_is_chance = info.get("shaping", "none") == "none"
         self.name = f"{self.run_name}@{getattr(self.agent, 'games_trained', '?')}"
+        # error bars: the same table through the neighbouring networks (other seeds / previous dx versions)
+        self.neighbours = [load_agent(self.models[r], seed=0) for r in siblings(self.run_name, list(self.models))]
+        self.base_x = None  # the average table for the "why" window, made on first use
+        self.detail_for, self.detail = None, {}
 
     def _dev_info(self, bridge: Bridge) -> None:
         bridge._call(cmd="dev_info", models=list(self.models), current=self.name)
@@ -128,21 +134,56 @@ class Brain:
         with self.log_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
+    def _bars(self, thought) -> list:
+        """[name, length 0..1, error bar low, high, label] for the best moves; the error bar is the spread of
+        the neighbouring networks on this table (none when there are no neighbours)."""
+        values = thought.values or {}
+        ranked = sorted(values, key=lambda a: -values[a])[:BARS]
+        if thought.choice in ranked:
+            ranked.remove(thought.choice)
+        ranked = [thought.choice] + ranked[:BARS - 1]
+        others = []
+        for n in self.neighbours:
+            q = n.q_values(thought.observation)
+            others.append({a: float(q[ACTION_INDEX[a]]) for a in ranked})
+        lo_v, hi_v = min(values.values()), max(values.values())
+        out = []
+        for a in ranked:
+            v = values[a]
+            spread = [v] + [o[a] for o in others]
+            if self.q_is_chance:
+                clip = lambda x: min(1.0, max(0.0, x))
+                out.append([SHORT.get(a, say(a)), clip(v), clip(min(spread)), clip(max(spread)),
+                            f"{round(100 * clip(v))}%"])
+            else:  # not a chance: bars only compare the moves with each other
+                frac = (v - lo_v) / ((hi_v - lo_v) or 1.0)
+                out.append([SHORT.get(a, say(a)), frac, frac, frac, f"{v:.2f}"])
+        return out
+
+    def _details(self, thought, ui: dict) -> dict:
+        """The slow parts (error bars, why, the network, the adrenaline target), once per thought."""
+        key = (id(thought), bool(ui.get("panel_i")), bool(ui.get("panel_n")))
+        if key == self.detail_for:
+            return self.detail
+        d = {"bars": self._bars(thought)}
+        if is_adrenaline(thought.choice):
+            target = steal_target(self.agent, thought.observation)
+            if target:
+                d["steal"] = NAMES.get(target, target)
+        if ui.get("panel_i") and hasattr(self.agent, "net"):
+            if self.base_x is None:
+                self.base_x = average_table(self.agent)
+            d["why"] = why(self.agent, thought.observation, thought.choice, self.base_x)
+        if ui.get("panel_n"):
+            d["net"] = self._net(thought)
+        self.detail_for, self.detail = key, d
+        return d
+
     def _show(self, bridge: Bridge, thought=None, status: str = "", ui: dict | None = None, last: str = "") -> None:
         """Sends what the panels show; only when it changed."""
-        view = {"agent": self.name, "status": status, "names": NAMES, "last": last}
+        view = {"agent": self.name, "status": status, "names": NAMES, "last": last, "chance_units": self.q_is_chance}
         if thought is not None:
-            values = thought.values or {}
-            chance = lambda a: min(1.0, max(0.0, values[a])) if self.q_is_chance and a in values else None
-            ranked = sorted(values, key=lambda a: -values[a])
-            others = [a for a in ranked if a != thought.choice][:2]
-            best = values.get(thought.choice, 0.0)
-            view |= {"move": say(thought.choice), "chance": chance(thought.choice),
-                     "alts": [[SHORT.get(a, say(a)), chance(a)] for a in others] if self.q_is_chance else [],
-                     "all": [[say(a), chance(a)] for a in ranked],
-                     "tie": bool(others) and best - values[others[0]] < TIE}
-            if (ui or {}).get("panel_n"):
-                view["net"] = self._net(thought)
+            view |= {"move": say(thought.choice)} | self._details(thought, ui or {})
         key = json.dumps(view, ensure_ascii=False, sort_keys=True)
         if key != self.sent:
             self.sent = key
@@ -154,25 +195,29 @@ class Brain:
         bridge.speed(self.speed)
         bridge.mute(self.mute)
         self._dev_info(bridge)
-        print(f"connected: {self.name}. In the game: F1 AI on/off, → move, Space auto, Ctrl+1…4 speed, "
-              "I data, N network, ~ developer mode")
+        print(f"connected: {self.name}. In the game: [F1] AI, [Space] move, [Ctrl+Space] auto, [Ctrl+1-4] speed, "
+              "[I] why, [N] network, [F11] fullscreen, [~] developer mode")
         last_key, thought, shown_at, typed, last_choice = None, None, 0.0, [], ""
-        started, last_obs, ai_moves, your_moves, cheated = None, None, 0, 0, False
+        started, last_obs, ai_moves, your_moves, cheated, dev_at_start = None, None, 0, 0, False, 0
+        dev_now = 0
         while True:
             st, obs, legal = game.read()
             ui = st.get("ui", {})
             game.speed = float(ui.get("speed", 1.0)) or 1.0
+            dev_before, dev_now = dev_now, int(ui.get("dev_changes", 0))  # a dev command changed the table
             if ui.get("model_req") and ui["model_req"] != self.run_name:
                 self._switch(bridge, ui["model_req"])
                 last_key = None  # think again with the new network
             if obs is not None and started is None:
                 started, ai_moves, your_moves, cheated = time.time(), 0, 0, False
+                dev_at_start = int(ui.get("dev_changes", 0))
             cheated = cheated or bool(ui.get("cheat") and obs is not None)
             if obs is None and started is not None and last_obs is not None:  # left the table: game over
                 rounds = last_obs["rounds_beat"]
                 who = self.name if your_moves == 0 else (f"akel (hints {self.name})" if ai_moves == 0
                                                          else f"akel + {self.name}")
                 who += " (cheats)" if cheated else ""
+                who += " (dev)" if int(ui.get("dev_changes", 0)) > dev_at_start else ""  # hp/shells/items changed
                 save_game({"finished_at": datetime.now().isoformat(timespec="seconds"), "bot": who,
                            "speed": game.speed, "seconds": round(time.time() - started, 1),
                            "actions": ai_moves + your_moves, "rounds_beat": rounds + 1, "rounds_survived": rounds,
@@ -185,8 +230,8 @@ class Brain:
             if obs is not None and legal:
                 key = json.dumps([obs, legal], sort_keys=True)
                 if key != last_key:
-                    if last_key is not None:
-                        your_moves += 1  # the decision changed without the AI acting: you moved
+                    if last_key is not None and dev_now == dev_before:
+                        your_moves += 1  # the decision changed without the AI acting (or a dev command): you moved
                     last_key, thought, shown_at = key, self.agent.think(obs, legal), time.time()
                     self._log(thought, st, ui)
                 self._show(bridge, thought, ui=ui)
@@ -199,7 +244,7 @@ class Brain:
                         last_key, last_choice = None, say(thought.choice)
                 time.sleep(0.03)
                 continue
-            if last_key is not None:
+            if last_key is not None and dev_now == dev_before:
                 your_moves += 1  # the decision went away without the AI acting: you moved
             last_key = None
             waiting = "жду своего хода…" if obs is not None else "ждём стол (Double or Nothing)…"
