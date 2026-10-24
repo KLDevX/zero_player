@@ -1,4 +1,4 @@
-# In-game AI interface — plan (agreed with Akel 2026-10-24; step 1 built)
+# In-game AI interface — plan (agreed with Akel 2026-10-24; step 1, I, N and developer mode built)
 
 Replaces the tkinter overlay: the bridge (a Godot autoload in the lab copy) draws the interface **inside the
 game** with the game's own fonts and colours; Python stays the brain (dx1.5 for fast play, x1 for hints)
@@ -58,3 +58,25 @@ Later: the AI's voice (short spoken-style lines, then the conversation "brain" v
 - Tested on the game (muted): menus walked with F1 on, → made one move (phone → «№2 холостой»), Space at
   ×10 played to the end, game saved as `dx1.5@991956` (3 rounds survived, 52 AI moves). Hint mode with F1
   off shows advice. Screenshots: `reports/ui/` (git-ignored).
+
+## Built: UX pass 2 (2026-10-24, Akel's notes)
+- One style: «чек» (Fake Receipt Cyr); the other two and F6 removed. All text is drawn in capitals (the font
+  is capitals-only and draws some small letters oddly).
+- Fixed panel sizes and fixed rows, text cut with «…»: nothing jumps when the text changes.
+- Shells in two lines: «в ружье» (which shells exist) and «порядок» (each shell in turn: grey unknown,
+  coloured seen, outline counted, yellow line under the chamber). Cuffs: «на дилере» green / «на тебе» red /
+  «нет» grey; saw «да ×2» / «нет».
+- Right panel: «ходы почти равны» when the best two moves differ by under 1% (dx's own noise; see the
+  medicine moments below), «последний ход» while waiting.
+- I (middle left): every legal move with its chance, both sides' items, round / load / DoN cycles, model.
+- N (bottom left): 73 → 64 → 64 → 21, dot brightness = how strongly a neuron fires, the 24 strongest
+  connections per layer (green adds, red subtracts; into the chosen move only for the last layer).
+- Developer mode on Ё/~ (physical key, any layout): console (help, model, models, speed, ai, auto, i, n,
+  cheat, mute, unmute, clear, ↑/↓ history), F2/F3 panel boxes, F4 cheats, PgUp/PgDn model. While it is
+  open every key and click goes to it, not to the game.
+- Cheats show the real order on the «порядок» line (pale shells with a purple mark), on screen only; the
+  Python side never receives it, and the game is saved as «… (cheats)».
+- Akel's moments (Steam screenshots 17:53–17:57): dx chose medicine over a safe win because its values only
+  mean "chance to win this round" — HP doesn't carry over, so with a certain win medicine, cigarettes and the
+  shot were all ≈100% (1.007 vs 0.997, inside its noise). An AI fix (prefer the safe/fast move on ties) is
+  for later; the interface now says when moves are tied.

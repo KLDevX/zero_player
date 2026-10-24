@@ -15,7 +15,11 @@ extends Node
 #   {"cmd": "screenshot", "path": "C:/.../x.png"} -> saves the game's frame with the interface
 #   {"cmd": "key", "key": "F1", "ctrl": false} -> presses an interface key, as if typed (tests)
 # The state reply also carries "ui": AI on/off, auto or step mode, speed — set by the keys in the game:
-#   F1 AI on/off · → one move · Space auto/step · Ctrl+1…4 speed ×1/×3/×10/×20 · F6 interface style
+#   F1 AI on/off · → one move · Space auto/step · Ctrl+1…4 speed ×1/×3/×10/×20 · I all data · N network
+#   ~ developer mode: console, F2/F3 panels, F4 cheats (the real shell order, on screen only), PgUp/PgDn model
+#   {"cmd": "dev_info", "models": [...], "current": "dx1.5@…"} -> the models the brain can load
+#   {"cmd": "dev_log", "text": "..."} -> a line in the developer console
+# Keys are matched by their place on the keyboard (physical), so they work in the Russian layout too.
 # An action is one click the player could make right now, performed through the game's own
 # InteractionManager.MainInteractionEvent(), the same path a mouse click takes.
 
@@ -74,7 +78,11 @@ var k_table_prev := {}        # {"player": {...}, "dealer": {...}} item counts o
 # its keys are seen before the game's own (input goes to the last node first).
 var hud_layer: CanvasLayer
 var hud: Control
-var ui := {"ai_on": false, "auto": false, "steps": 0}
+var ui := {"ai_on": false, "auto": false, "steps": 0, "panel_i": false, "panel_n": false, "cheat": false,
+		   "model_req": ""}
+const HELP := """model <имя> — сменить модель · models — список
+speed <x> · ai on|off · auto on|off
+i · n · cheat — панели и читы · mute · unmute · clear"""
 var window_fix_at := -1  # when to re-enter fullscreen (ms); -1 = not yet planned, 0 = done
 
 
@@ -126,6 +134,8 @@ func _process(_delta: float) -> void:
 	_track_knowledge()
 	var state := {"public": _public(), "_hidden": _hidden()}
 	hud.public = state["public"] if rm.endless else {}
+	# cheats: the real order, for the screen only — never in a reply to Python
+	hud.cheat_order = state["_hidden"]["sequence"] if ui["cheat"] and rm.endless else []
 	var key := JSON.stringify(state)
 	if key != last_state:
 		last_state = key
@@ -234,10 +244,19 @@ func _handle(msg: Dictionary) -> Dictionary:
 			# Press an interface key as if typed in the game (for tests): {"key": "F1", "ctrl": false}
 			var ev := InputEventKey.new()
 			ev.keycode = OS.find_keycode_from_string(str(msg.get("key", "")))
+			ev.physical_keycode = ev.keycode
+			ev.unicode = int(msg.get("char", 0))  # a typed character, for console tests
 			ev.ctrl_pressed = bool(msg.get("ctrl", false))
 			ev.pressed = true
 			Input.parse_input_event(ev)
 			return {"ok": ev.keycode != KEY_NONE}
+		"dev_info":
+			hud.models = msg.get("models", [])
+			hud.model_current = str(msg.get("current", ""))
+			return {"ok": true}
+		"dev_log":
+			hud.log_line(str(msg.get("text", "")))
+			return {"ok": true}
 		"take_step":
 			if ui["steps"] > 0:
 				ui["steps"] -= 1
@@ -280,25 +299,39 @@ func _set_speed(x: float) -> void:
 
 
 func _ui_state() -> Dictionary:
-	return {"ai_on": ui["ai_on"], "auto": ui["auto"], "steps": ui["steps"], "speed": target_scale}
+	return {"ai_on": ui["ai_on"], "auto": ui["auto"], "steps": ui["steps"], "speed": target_scale,
+			"panel_i": ui["panel_i"], "panel_n": ui["panel_n"], "cheat": ui["cheat"], "model_req": ui["model_req"]}
 
 
 # Keys of the in-game interface (hud.gd passes every key press here first). Returns true if the key was ours,
 # so the game doesn't also act on it (arrows and Space move the game's controller cursor otherwise).
 func on_key(event: InputEventKey) -> bool:
-	if not event.pressed or event.echo:
+	if not event.pressed:
 		return false
-	if event.ctrl_pressed and event.keycode >= KEY_1 and event.keycode <= KEY_4:
-		_set_speed(SPEEDS[event.keycode - KEY_1])
+	var key := event.physical_keycode
+	if key == KEY_QUOTELEFT:
+		if not event.echo:
+			hud.dev_open = not hud.dev_open
 		return true
-	match event.keycode:
+	if hud.dev_open:
+		_dev_key(event, key)
+		return true  # while the console is open every key is ours
+	if event.echo:
+		return false
+	if event.ctrl_pressed and key >= KEY_1 and key <= KEY_4:
+		_set_speed(SPEEDS[key - KEY_1])
+		return true
+	match key:
 		KEY_F1:
 			ui["ai_on"] = not ui["ai_on"]
 			ui["auto"] = false
 			ui["steps"] = 0
 			return true
-		KEY_F6:
-			hud.style_index = (hud.style_index + 1) % hud.STYLES.size()
+		KEY_I:
+			ui["panel_i"] = not ui["panel_i"]
+			return true
+		KEY_N:
+			ui["panel_n"] = not ui["panel_n"]
 			return true
 		KEY_RIGHT:
 			if ui["ai_on"] and not ui["auto"]:
@@ -310,6 +343,90 @@ func on_key(event: InputEventKey) -> bool:
 				ui["steps"] = 0
 				return true
 	return false
+
+
+func _dev_key(event: InputEventKey, key: int) -> void:
+	match key:
+		KEY_F2:
+			if not event.echo:
+				ui["panel_i"] = not ui["panel_i"]
+		KEY_F3:
+			if not event.echo:
+				ui["panel_n"] = not ui["panel_n"]
+		KEY_F4:
+			if not event.echo:
+				_console("cheat")
+		KEY_PAGEUP, KEY_PAGEDOWN:
+			if not hud.models.is_empty():
+				var i: int = hud.models.find(ui["model_req"] if ui["model_req"] != "" else hud.model_current.split("@")[0])
+				i = (i + (1 if key == KEY_PAGEDOWN else -1) + hud.models.size()) % hud.models.size()
+				ui["model_req"] = hud.models[i]
+				hud.log_line("модель → " + hud.models[i])
+		KEY_ENTER, KEY_KP_ENTER:
+			var line: String = hud.console_line.strip_edges()
+			hud.console_line = ""
+			if line != "":
+				hud.console_history.append(line)
+				hud.history_at = hud.console_history.size()
+				hud.log_line("> " + line)
+				_console(line)
+		KEY_BACKSPACE:
+			hud.console_line = hud.console_line.substr(0, maxi(0, hud.console_line.length() - 1))
+		KEY_UP, KEY_DOWN:
+			if not hud.console_history.is_empty():
+				hud.history_at = clampi(hud.history_at + (-1 if key == KEY_UP else 1), 0, hud.console_history.size())
+				hud.console_line = hud.console_history[hud.history_at] if hud.history_at < hud.console_history.size() else ""
+		KEY_ESCAPE:
+			hud.dev_open = false
+		_:
+			if event.unicode >= 32:
+				hud.console_line += char(event.unicode)
+
+
+func _console(line: String) -> void:
+	var words := line.split(" ", false)
+	var cmd := words[0].to_lower()
+	var arg := words[1].to_lower() if words.size() > 1 else ""
+	var on := arg != "off"
+	match cmd:
+		"help":
+			hud.log_line(HELP)
+		"models":
+			hud.log_line(", ".join(hud.models) if not hud.models.is_empty() else "мозг ИИ не подключён")
+		"model":
+			if not hud.models.has(arg):
+				hud.log_line("нет модели «%s»: models — список" % arg)
+			else:
+				ui["model_req"] = arg
+				hud.log_line("загружаю " + arg)
+		"speed":
+			if arg.is_valid_float() and float(arg) > 0:
+				_set_speed(float(arg))
+				hud.log_line("скорость ×" + arg)
+			else:
+				hud.log_line("speed <число>, например speed 5")
+		"ai":
+			ui["ai_on"] = on
+			ui["steps"] = 0
+			hud.log_line("ИИ " + ("включён" if on else "выключен"))
+		"auto":
+			ui["auto"] = on
+			ui["steps"] = 0
+			hud.log_line("авто " + ("вкл" if on else "выкл"))
+		"i", "n":
+			var k := "panel_" + cmd
+			ui[k] = (not ui[k]) if arg == "" else on
+			hud.log_line("панель %s %s" % [cmd.to_upper(), "вкл" if ui[k] else "выкл"])
+		"cheat":
+			ui["cheat"] = (not ui["cheat"]) if arg == "" else on
+			hud.log_line("читы " + ("вкл (видишь только ты, ИИ — нет)" if ui["cheat"] else "выкл"))
+		"mute", "unmute":
+			AudioServer.set_bus_mute(0, cmd == "mute")
+			hud.log_line("звук " + ("выкл" if cmd == "mute" else "вкл"))
+		"clear":
+			hud.console_log = []
+		_:
+			hud.log_line("неизвестная команда: " + cmd + " (help)")
 
 
 # Returns {action key: InteractionBranch node} for every click the player could make right now.
