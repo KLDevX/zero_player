@@ -199,11 +199,12 @@ class Brain:
               "[I] why, [N] network, [F11] fullscreen, [~] developer mode")
         last_key, thought, shown_at, typed, last_choice = None, None, 0.0, [], ""
         started, last_obs, ai_moves, your_moves, cheated, dev_at_start = None, None, 0, 0, False, 0
+        restarts_at_start = 0
         dev_now = 0
         while True:
             st, obs, legal = game.read()
             ui = st.get("ui", {})
-            game.speed = float(ui.get("speed", 1.0)) or 1.0
+            game.speed = float(ui.get("scale_now", ui.get("speed", 1.0))) or 1.0  # ×1 while a move is chosen
             dev_before, dev_now = dev_now, int(ui.get("dev_changes", 0))  # a dev command changed the table
             if ui.get("model_req") and ui["model_req"] != self.run_name:
                 self._switch(bridge, ui["model_req"])
@@ -211,6 +212,7 @@ class Brain:
             if obs is not None and started is None:
                 started, ai_moves, your_moves, cheated = time.time(), 0, 0, False
                 dev_at_start = int(ui.get("dev_changes", 0))
+                restarts_at_start = int(ui.get("restarts", 0))
             cheated = cheated or bool(ui.get("cheat") and obs is not None)
             if obs is None and started is not None and last_obs is not None:  # left the table: game over
                 rounds = last_obs["rounds_beat"]
@@ -219,10 +221,11 @@ class Brain:
                 who += " (cheats)" if cheated else ""
                 who += " (dev)" if int(ui.get("dev_changes", 0)) > dev_at_start else ""  # hp/shells/items changed
                 save_game({"finished_at": datetime.now().isoformat(timespec="seconds"), "bot": who,
-                           "speed": game.speed, "seconds": round(time.time() - started, 1),
+                           "speed": float(ui.get("speed", 1.0)), "seconds": round(time.time() - started, 1),
                            "actions": ai_moves + your_moves, "rounds_beat": rounds + 1, "rounds_survived": rounds,
                            "don_cycles_beat": (st.get("public") or {}).get("don_cycles_beat", 0),
-                           "don_prize": 0, "end": "death"})
+                           "don_prize": 0,
+                           "end": "restart" if int(ui.get("restarts", 0)) > restarts_at_start else "death"})
                 print(f"game saved: {who}, rounds survived {rounds} (AI moves {ai_moves}, yours {your_moves})")
                 started, last_obs = None, None
             if obs is not None:
@@ -236,7 +239,9 @@ class Brain:
                     self._log(thought, st, ui)
                 self._show(bridge, thought, ui=ui)
                 if ui.get("ai_on"):
-                    due = time.time() - shown_at >= self.pause / game.speed
+                    # hunting the achievement: no pause to look at the thought (the first prize is game time)
+                    pause = 0.0 if ui.get("achievement") else self.pause
+                    due = time.time() - shown_at >= pause / game.speed
                     if (ui.get("auto") and due) or (not ui.get("auto") and bridge.take_step()):
                         self._show(bridge, thought, status=f"ход: {say(thought.choice)}", ui=ui)
                         if game.perform(thought.choice):

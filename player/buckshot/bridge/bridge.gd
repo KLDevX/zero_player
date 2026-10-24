@@ -33,6 +33,7 @@ const MENU_PATH := "res://scripts/MenuManager.gd"
 const ITEMS_PATH := "res://scripts/ItemInteraction.gd"
 const TIMESCALE_PATH := "res://scripts/TimeScaleManager.gd"
 const PHONE_PATH := "res://scripts/BurnerPhone.gd"
+const RESET_PATH := "res://scripts/ResetManager.gd"
 const BRANCH_PATH := "res://scripts/InteractionBranch.gd"
 const SPEEDS := [1.0, 3.0, 10.0, 20.0]
 # Clicks the bridge may make. Everything else (CRT, credits, heaven, menus) is left alone.
@@ -62,6 +63,7 @@ var target_scale := 1.0
 var observed_scale := 1.0  # time scale the last frame really ran at (before we set ours)
 var menu_started := false
 var phone: Node = null
+var reset_manager: Node = null  # the game's own restart (hold R for 0.8 s)
 # What the player can know, tracked from what happens on screen (the same fields as the simulator's
 # observation): shells seen leaving the gun, inversions, the player's own magnifier and phone.
 var k_prev: Array = []        # the gun last frame
@@ -80,7 +82,7 @@ var k_table_prev := {}        # {"player": {...}, "dealer": {...}} item counts o
 var hud_layer: CanvasLayer
 var hud: Control
 var ui := {"ai_on": false, "auto": false, "steps": 0, "panel_i": false, "panel_n": false, "cheat": false,
-		   "model_req": "", "dev_changes": 0, "achievement": false}
+		   "model_req": "", "dev_changes": 0, "achievement": false, "restarts": 0, "realtime": true}
 # The one achievement the bridge may give (Akel's choice): "ach10", dying in Double or Nothing with a prize
 # over 1 000 000 — the game's own rule (DeathManager.gd:143). The game itself can't give it here, because the
 # bridge switches Steam off (using_steam = false) so nothing reaches the leaderboard; the leaderboard stays
@@ -92,11 +94,16 @@ var run_cheat := false     # `cheat order` was on at the table during this run
 var run_ai := true         # the AI was on ([F1]) the whole run: only then it's the AI's achievement
 var run_endless := false   # what the last frame of the run looked like
 var run_prize := 0
+# Akel: while hunting ach10, a run whose first prize will end under 31 250 is restarted at once (from that
+# prize on, 18 rounds are enough instead of 21). The first prize only falls while its timer runs, so the
+# moment the live estimate drops under the line the run can't make it.
+const RESTART_BELOW := 31250
 const HELP := """model <имя> · models · speed <x> · ai on|off · auto on|off
 hp <n> · hp dealer <n> · kill dealer (в твой ход)
 shells live blank … · remove <предмет> [dealer]
 cheat order — видеть порядок патронов · i · n
-achievement on|off — выдать «1 000 000 и умер» за чистую партию · mute · unmute · clear"""
+achievement on|off — выдать «1 000 000 и умер» за чистую партию
+realtime on|off — выбор хода на ×1 (анимации на ×N) · mute · unmute · clear"""
 const ITEM_NAMES := {"наручники": "handcuffs", "пиво": "beer", "лупа": "magnifying glass", "сигареты": "cigarettes",
 		"пила": "handsaw", "лекарство": "expired medicine", "инвертор": "inverter", "телефон": "burner phone",
 		"адреналин": "adrenaline"}
@@ -131,13 +138,14 @@ func _ready() -> void:
 func _process(_delta: float) -> void:
 	observed_scale = Engine.time_scale
 	_serve()
+	var want := _wanted_scale()
 	if target_scale != 1.0 and Engine.time_scale != 0.0:
 		# TimeScaleManager's slow-mo after a dealer kill never clears its "moving" flag and keeps
 		# setting Engine.time_scale back to 1.0 every frame (TimeScaleManager.gd:21-27).
 		for tsm in timescale_managers:
 			if is_instance_valid(tsm):
 				tsm.moving = false
-		Engine.time_scale = target_scale
+		Engine.time_scale = want
 	hud.ui = _ui_state()
 	if not _scene_ok():
 		hud.public = {}
@@ -151,6 +159,7 @@ func _process(_delta: float) -> void:
 	run_prize = int(rm.endscore) if rm.endscore != null else 0
 	run_cheat = run_cheat or (ui["cheat"] and rm.endless)
 	run_ai = run_ai and (ui["ai_on"] or not rm.endless)
+	_restart_if_slow()
 	var state := {"public": _public(), "_hidden": _hidden()}
 	hud.public = state["public"] if rm.endless else {}
 	if rm.endless:
@@ -189,6 +198,7 @@ func _rescan() -> void:
 	item_interaction = null
 	timescale_managers = []
 	phone = null
+	reset_manager = null
 	k_prev = []
 	k_knows = []
 	k_fired = []
@@ -211,6 +221,7 @@ func _rescan() -> void:
 			ITEMS_PATH: item_interaction = node
 			TIMESCALE_PATH: timescale_managers.append(node)
 			PHONE_PATH: phone = node
+			RESET_PATH: reset_manager = node
 	if hud_layer.get_parent() == get_tree().root:
 		get_tree().root.move_child(hud_layer, -1)
 	if rm != null:
@@ -323,6 +334,16 @@ func _toggle_fullscreen() -> void:
 		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
 
 
+# Speed-up is for the game's animations only: while the cursor is shown somebody is choosing a move, and the
+# game runs at its normal ×1, so a choice costs as much game time as it takes (at ×20 every real millisecond
+# of the bot's reaction cost 20 ms of the prize timer; 189 game-seconds per first cycle). `realtime off` in
+# the console switches it off.
+func _wanted_scale() -> float:
+	if ui["realtime"] and cursor != null and is_instance_valid(cursor) and cursor.cursor_visible and _scene_ok():
+		return 1.0
+	return target_scale
+
+
 func _set_speed(x: float) -> void:
 	target_scale = x
 	Engine.time_scale = target_scale
@@ -332,7 +353,8 @@ func _set_speed(x: float) -> void:
 func _ui_state() -> Dictionary:
 	return {"ai_on": ui["ai_on"], "auto": ui["auto"], "steps": ui["steps"], "speed": target_scale,
 			"panel_i": ui["panel_i"], "panel_n": ui["panel_n"], "cheat": ui["cheat"], "model_req": ui["model_req"],
-			"dev_changes": ui["dev_changes"]}
+			"dev_changes": ui["dev_changes"], "achievement": ui["achievement"], "restarts": ui["restarts"],
+			"scale_now": Engine.time_scale}
 
 
 # Keys of the in-game interface (hud.gd passes every key press here first). Returns true if the key was ours,
@@ -469,9 +491,14 @@ func _console(line: String) -> void:
 				state = "вкл"
 			hud.log_line("достижение «1 000 000 и умер»: " + state + " · партия " + ("засчитается" if _run_clean() else
 					"не засчитается: " + _run_problem()))
+			hud.log_line("с ним: ран перезапускается, если первый приз будет меньше %d (перезапусков: %d)"
+					% [RESTART_BELOW, ui["restarts"]])
 			if Engine.has_singleton("Steam"):
 				var got: Dictionary = Steam.getAchievement("ach10")
 				hud.log_line("в Steam: " + ("уже получено" if got.get("achieved", false) else "ещё нет"))
+		"realtime":
+			ui["realtime"] = arg != "off"
+			hud.log_line("выбор хода на ×1, анимации на ×N: " + ("вкл" if ui["realtime"] else "выкл"))
 		"mute", "unmute":
 			AudioServer.set_bus_mute(0, cmd == "mute")
 			hud.log_line("звук " + ("выкл" if cmd == "mute" else "вкл"))
@@ -479,6 +506,24 @@ func _console(line: String) -> void:
 			hud.console_log = []
 		_:
 			hud.log_line("неизвестная команда: " + cmd + " (help)")
+
+
+func _first_prize_estimate() -> int:
+	return maxi(10, 70000 - int(rm.initial_time / 600.0 * 40000.0))
+
+
+func _restart_if_slow() -> void:
+	if not (ui["achievement"] and ui["ai_on"] and rm.endless and rm.counting) or reset_manager == null:
+		return
+	if rm.double_or_nothing_initial_score > 0 or _first_prize_estimate() >= RESTART_BELOW:
+		return
+	ui["restarts"] += 1
+	var text := "первый приз будет меньше %d — перезапуск рана (%d)" % [RESTART_BELOW, ui["restarts"]]
+	print("[bridge] ", text)
+	hud.log_line(text)
+	_write({"event": text})
+	run_endless = false  # a restart is not a death with a prize
+	reset_manager.Reset()  # the same as holding R
 
 
 func _run_clean() -> bool:

@@ -75,14 +75,16 @@ class LiveGame:
         return st, obs, legal
 
     def click_when_ready(self, key: str, timeout: float = 20.0) -> bool:
-        """Wait until `key` is clickable and the clickable set has been stable for a moment, then click."""
-        settle = SETTLE_GAME_SECONDS / self.speed
+        """Wait until `key` is clickable and the clickable set has been stable for a moment, then click.
+        The moment is in game time: the bridge says how fast the game runs right now (×1 while choosing)."""
         prev, since, start = None, time.time(), time.time()
         while time.time() - start < timeout:
-            legal = self.bridge.state().get("legal", [])
+            st = self.bridge.state()
+            legal = st.get("legal", [])
+            scale = float(st.get("ui", {}).get("scale_now", self.speed)) or self.speed
             if legal != prev:
                 prev, since = legal, time.time()
-            if key in legal and time.time() - since >= settle:
+            if key in legal and time.time() - since >= SETTLE_GAME_SECONDS / scale:
                 return bool(self.bridge.act(key).get("ok"))
             time.sleep(0.02)
         return False

@@ -117,3 +117,12 @@ Later: the AI's voice (short spoken-style lines, then the conversation "brain" v
 - Game seed (answered, not built): the game uses Godot's global RNG only (no randomize()/RNG objects), so the
   bridge could seed each load; cosmetic randomness every frame makes later situations differ. Identical
   situations: the simulator's seeds.
+
+## Built: faster AI in game time, restarts (2026-10-25)
+- Measured: at ×20 the bot's choices cost 189 game-seconds of the first cycle — every real millisecond of its
+  reaction is 20 game ms. Now the game runs at ×1 while the cursor is shown (a move is being chosen) and at
+  ×N only during animations (`realtime on|off`); the settle wait is counted in game time at the current scale.
+  In achievement mode the bot shows no thinking pause. First cycle: 728 → 424 game-seconds, first prize
+  21 078 → 41 711 (one clean AI run). Faster doesn't help ach10 any more: 31 250…62 500 all need 18 rounds.
+- Achievement mode restarts a run as soon as the live first-prize estimate falls under 31 250 (the game's own
+  reset, the same as holding R; not a dev command). Such games are saved with end «restart».
