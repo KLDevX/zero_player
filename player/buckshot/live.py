@@ -13,8 +13,9 @@ from player.buckshot.sim import DOUBLE_NO, DOUBLE_YES, ITEMS, SHOOT_DEALER, SHOO
 
 # One agent action = these clicks, in order (bridge action keys).
 SHOT_CLICKS = {SHOOT_SELF: ["shotgun", "text you"], SHOOT_DEALER: ["shotgun", "text dealer"]}
-SETTLE_GAME_SECONDS = 0.6  # without the bridge's busy signal: wait until the clickable set is stable this long
-FREE_GAME_SECONDS = 0.1    # with it: the game must be free (no one-shot animation, camera still) this long
+SETTLE_GAME_SECONDS = 0.6  # old bridges (no busy signal): wait until the clickable set is stable this long
+ALLOWED_GAME_SECONDS = 0.05  # new bridges: the game allows the click (permission on, the thing shown, its collider
+                             # on, the cursor out) and has kept allowing it for a couple of frames — like a human
 
 
 def observation(public: dict, legal_keys: list[str]) -> tuple[dict | None, list[str]]:
@@ -77,27 +78,27 @@ class LiveGame:
         return st, obs, legal
 
     def click_when_ready(self, key: str, timeout: float = 20.0) -> bool:
-        """Click `key` as soon as the game is free: the key is clickable, the clickable set and the bridge's busy
-        signal (camera turning, a one-shot animation playing) have been quiet for a moment. Old bridges without
-        the busy signal: the clickable set must be stable for SETTLE_GAME_SECONDS. Times are game time: the bridge
-        says how fast the game runs right now (×1 while choosing)."""
+        """Click `key` as soon as the game allows it: the bridge lists it as clickable (the game's permission is on,
+        the thing is shown and its collider on, the cursor is out) and the list has held for a couple of frames.
+        The bot clicks the thing directly, not with the mouse, so camera turns don't matter. Old bridges without the
+        busy signal: the list must be stable for SETTLE_GAME_SECONDS. Times are game time at the current scale."""
         prev, since, start, busy = None, time.time(), time.time(), None
         while time.time() - start < timeout:
             st = self.bridge.state()
             legal = st.get("legal", [])
-            busy = st.get("busy")
+            busy = st.get("busy")  # what the game is animating: only for the log of refused clicks
             scale = float(st.get("ui", {}).get("scale_now", self.speed)) or self.speed
-            if (legal, busy) != prev:
-                prev, since = (legal, busy), time.time()
-            wait = SETTLE_GAME_SECONDS if busy is None else FREE_GAME_SECONDS
-            if key in legal and not busy and time.time() - since >= wait / scale:
+            if legal != prev:
+                prev, since = legal, time.time()
+            wait = SETTLE_GAME_SECONDS if busy is None else ALLOWED_GAME_SECONDS
+            if key in legal and time.time() - since >= wait / scale:
                 reply = self.bridge.act(key)
                 if not reply.get("ok") and self.on_refused:
                     self.on_refused({"key": key, "why": reply.get("error"), "legal": legal, "busy": busy})
                 return bool(reply.get("ok"))
             time.sleep(0.01)
         if self.on_refused:
-            self.on_refused({"key": key, "why": f"not clickable for {timeout:g} s", "legal": prev[0] if prev else [],
+            self.on_refused({"key": key, "why": f"not clickable for {timeout:g} s", "legal": prev or [],
                              "busy": busy})
         return False
 

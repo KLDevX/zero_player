@@ -36,7 +36,6 @@ const PHONE_PATH := "res://scripts/BurnerPhone.gd"
 const RESET_PATH := "res://scripts/ResetManager.gd"
 const CAMERA_PATH := "res://scripts/CameraManager.gd"
 const AMBIENT := ["light", "animator_pp"]  # animators that play now and then for the mood (flicker, fades)
-const SHOTGUN_READY := 0.6  # game seconds into "player grab shotgun" when the target may be clicked
 const BRANCH_PATH := "res://scripts/InteractionBranch.gd"
 const SPEEDS := [1.0, 3.0, 10.0, 20.0]
 # Clicks the bridge may make. Everything else (CRT, credits, heaven, menus) is left alone.
@@ -724,7 +723,7 @@ func _legal() -> Dictionary:
 
 # What keeps the game busy right now: "" when it is free. Hands, dealer, items and camera turns are played
 # by AnimationPlayers and the CameraManager; looping ones (lights, idle sway) are background and don't count.
-# The bot clicks when the game is free, instead of waiting a fixed moment (docs/ui-plan.md).
+# Reported for the logs only: the bot clicks when the game allows it (the clickable list), like a human.
 func _busy() -> String:
 	# CameraManager never clears `moving` (CameraManager.gd:84-95): the turn is over when elapsed reaches dur
 	if camera != null and is_instance_valid(camera) and camera.moving and camera.elapsed < camera.dur:
@@ -733,10 +732,6 @@ func _busy() -> String:
 		if not is_instance_valid(ap) or not ap.is_playing() or AMBIENT.any(func(a): return ap.name.contains(a)):
 			continue
 		var anim: Animation = ap.get_animation(ap.current_animation) if ap.current_animation != "" else null
-		# raising the shotgun plays 5 s, but the target can be chosen long before; the old fixed 0.6 s wait was
-		# always enough (clicking 0.05 s after the grab froze the game)
-		if ap.current_animation == "player grab shotgun" and ap.current_animation_position >= SHOTGUN_READY:
-			continue
 		if anim != null and anim.loop_mode == Animation.LOOP_NONE:
 			return "%s:%s" % [ap.name, ap.current_animation]
 	return ""

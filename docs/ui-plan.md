@@ -139,3 +139,16 @@ Later: the AI's voice (short spoken-style lines, then the conversation "brain" v
 - games.csv: a game ends only when the table scene ends (by scene id: at ×20 the death screen can pass between
   two looks); a moment with no load between rounds no longer cuts a run into pieces. The prize is recorded;
   a window closed with Alt+F4 still saves the game as «closed».
+
+## Built: clicks when the game allows them (2026-10-25, Akel's choice «В+А»)
+- How the game decides a click is allowed — for every clickable thing (shotgun, targets, items, briefcase,
+  doors, pills, waiver, double or nothing): the thing's `interactionAllowed`, its collider on, the cursor out,
+  and per-action guards like `fs_dec` against a double shot. The bridge's clickable list already checks the
+  first three. `GrabShotgun()` switches the targets on at once while the 5 s raise animation plays: the game
+  lets a human pick the target right away.
+- So the bot no longer waits for animations (`busy` stays in the state reply, for the refused-click log only)
+  and needs no camera wait either: it clicks things directly, not with the mouse. It clicks once the game has
+  allowed the click for 0.05 game-s (a couple of frames). The shotgun exception is gone.
+- Tested, one cycle each (Akel: one cycle is enough): 13 and 8 shots, target chosen 0.07 s after the shotgun
+  (was 1.1 s, before that 5 s), no hang, 0 refused clicks. First prize with `achievement on`: 51 278
+  (21 078 at the start of the day, 41–43 k with the busy wait). The step-0 freeze was not this.
