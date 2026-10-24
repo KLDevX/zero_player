@@ -147,6 +147,9 @@ func _ready() -> void:
 	var path := reports_dir.path_join("live_%s.jsonl" % stamp)
 	log_file = FileAccess.open(path, FileAccess.WRITE)
 	var err := server.listen(PORT, "127.0.0.1")
+	# the AI plays for hours: ask Windows to keep the screen on while the game runs, like a video player does
+	# (the laptop fell asleep mid-hunt); no setting is changed, and it ends when the game closes
+	DisplayServer.screen_set_keep_on(true)
 	if OS.get_environment("BRIDGE_MUTE") == "1":
 		AudioServer.set_bus_mute(0, true)  # tests nobody watches: silent from the first frame
 	hud_layer = CanvasLayer.new()
