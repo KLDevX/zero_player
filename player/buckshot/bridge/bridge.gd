@@ -86,7 +86,24 @@ var k_table_prev := {}        # {"player": {...}, "dealer": {...}} item counts o
 var hud_layer: CanvasLayer
 var hud: Control
 var ui := {"ai_on": false, "auto": false, "steps": 0, "panel_i": false, "panel_n": false, "cheat": false,
-		   "model_req": "", "dev_changes": 0, "achievement": false, "restarts": 0, "realtime": true}
+		   "model_req": "", "dev_changes": 0, "achievement": false, "restarts": 0, "realtime": true, "record": false}
+# Recording record runs (Akel): every run is recorded — the game's frames (JPG, 4 per second, 15 when slow) and
+# its sound (AudioEffectRecord on the Master bus) — and kept only if it beat the record (12 rounds or more);
+# otherwise it is deleted. Near a record the game slows to ×1 so the video can be watched. A kept run is a
+# folder reports/ui/recordings/record_<N>r_<date>/ with frames, times.txt and sound.wav;
+# `python -m player.buckshot.recordings` makes an MP4 from it.
+const REC_MIN_ROUNDS := 12
+const REC_FAST_MS := 250
+const REC_SLOW_MS := 66
+var rec_dir := ""          # this run's folder while recording, "" = not recording
+var rec_frames := 0
+var rec_last_ms := 0
+var rec_t0 := 0
+var rec_times: PackedStringArray = []
+var rec_audio: AudioEffectRecord = null
+var rec_best := 0          # rounds of the kept record (read from reports/ui/recordings/record.json)
+var run_won := 0           # rounds won in this run, for the recording
+var rec_scene := 0         # the scene whose run is (or was) recorded
 # The one achievement the bridge may give (Akel's choice): "ach10", dying in Double or Nothing with a prize
 # over 1 000 000 — the game's own rule (DeathManager.gd:143). The game itself can't give it here, because the
 # bridge switches Steam off (using_steam = false) so nothing reaches the leaderboard; the leaderboard stays
@@ -107,7 +124,8 @@ hp <n> · hp dealer <n> · kill dealer (в твой ход)
 shells live blank … · remove <предмет> [dealer]
 cheat order — видеть порядок патронов · i · n
 achievement on|off — выдать «1 000 000 и умер» за чистую партию
-realtime on|off — выбор хода на ×1 (анимации на ×N) · mute · unmute · clear"""
+realtime on|off — выбор хода на ×1 (анимации на ×N)
+record on|off — записывать раны, оставлять рекордные (от 12 раундов) · mute · unmute · clear"""
 const ITEM_NAMES := {"наручники": "handcuffs", "пиво": "beer", "лупа": "magnifying glass", "сигареты": "cigarettes",
 		"пила": "handsaw", "лекарство": "expired medicine", "инвертор": "inverter", "телефон": "burner phone",
 		"адреналин": "adrenaline"}
@@ -164,6 +182,8 @@ func _process(_delta: float) -> void:
 	run_cheat = run_cheat or (ui["cheat"] and rm.endless)
 	run_ai = run_ai and (ui["ai_on"] or not rm.endless)
 	_restart_if_slow()
+	run_won = maxi(0, int(rm.brief.ending.endless_roundsbeat) - 1) if rm.endless else 0
+	_rec_frame()
 	var state := {"public": _public(), "_hidden": _hidden()}
 	hud.public = state["public"] if rm.endless else {}
 	if rm.endless:
@@ -182,15 +202,19 @@ func _process(_delta: float) -> void:
 
 
 func _rescan() -> void:
+	# The death check comes first, on the very first frame of a new scene: at ×20 the death screen can be gone
+	# before the next scan (it was: main → death → main with no scan in between).
+	var next := get_tree().current_scene
+	if next != null and next.get_instance_id() != scene_id:
+		if rec_dir != "":
+			_rec_stop(run_won)
+		if run_endless and (next.name.to_lower().contains("death") or next.scene_file_path.contains("death")):
+			_check_achievement()
+		run_endless = false  # (a null scene is the moment between two scenes: keep the run until the next one)
 	var now := Time.get_ticks_msec()
 	if now - last_scan < SCAN_INTERVAL_MS:
 		return
 	last_scan = now
-	var next := get_tree().current_scene
-	if next != null:
-		if run_endless and (next.name.to_lower().contains("death") or next.scene_file_path.contains("death")):
-			_check_achievement()
-		run_endless = false  # (a null scene is the moment between two scenes: keep the run until the next one)
 	scene = next
 	scene_id = scene.get_instance_id() if scene != null else 0
 	branches = []
@@ -350,6 +374,9 @@ func _toggle_fullscreen() -> void:
 # timer; 189 game-seconds per first cycle). After that the prize is set and everything runs at ×N (Akel).
 # `realtime off` in the console switches it off.
 func _wanted_scale() -> float:
+	if ui["record"] and rec_dir != "" and rm != null and _scene_ok() and rm.endless \
+			and run_won >= maxi(REC_MIN_ROUNDS - 1, rec_best):
+		return 1.0  # going for a record: normal speed, so the video can be watched
 	if ui["realtime"] and rm != null and _scene_ok() and rm.counting and cursor != null and is_instance_valid(cursor) 			and cursor.cursor_visible:
 		return 1.0
 	return target_scale
@@ -510,6 +537,15 @@ func _console(line: String) -> void:
 		"realtime":
 			ui["realtime"] = arg != "off"
 			hud.log_line("выбор хода на ×1, анимации на ×N: " + ("вкл" if ui["realtime"] else "выкл"))
+		"record":
+			if arg == "on" or arg == "off":
+				ui["record"] = arg == "on"
+			if arg == "test":
+				ui["record"] = true
+				ui["rec_test"] = true  # keep the next run whatever its rounds, aside from the record
+			_rec_load_best()
+			hud.log_line("запись рекордных ранов: %s · рекорд %d раунд. (сохраняется от %d)"
+					% ["вкл" if ui["record"] else "выкл", rec_best, REC_MIN_ROUNDS])
 		"mute", "unmute":
 			AudioServer.set_bus_mute(0, cmd == "mute")
 			hud.log_line("звук " + ("выкл" if cmd == "mute" else "вкл"))
@@ -537,6 +573,105 @@ func _restart_if_slow() -> void:
 	reset_manager.Reset()  # the same as holding R
 
 
+# --- recording record runs ------------------------------------------------------------------
+
+func _rec_root() -> String:
+	return get_script().resource_path.get_base_dir().path_join("../../../reports/ui/recordings").simplify_path()
+
+
+func _rec_load_best() -> void:
+	var f := FileAccess.open(_rec_root().path_join("record.json"), FileAccess.READ)
+	if f != null:
+		var d = JSON.parse_string(f.get_as_text())
+		if d is Dictionary:
+			rec_best = int(d.get("rounds", 0))
+
+
+func _rec_start() -> void:
+	if not ui["record"] or rm == null or not rm.endless:
+		return
+	_rec_load_best()
+	for stray in DirAccess.get_directories_at(_rec_root()) if DirAccess.dir_exists_absolute(_rec_root()) else []:
+		if stray.begins_with("run_"):
+			_rec_delete(_rec_root().path_join(stray))  # left by a game that was closed mid-run
+	var stamp := Time.get_datetime_string_from_system().replace(":", "-")
+	rec_dir = _rec_root().path_join("run_" + stamp)
+	DirAccess.make_dir_recursive_absolute(rec_dir)
+	rec_frames = 0
+	rec_last_ms = 0
+	rec_t0 = Time.get_ticks_msec()
+	rec_times = []
+	var bus := AudioServer.get_bus_index("Master")
+	if rec_audio == null:
+		rec_audio = AudioEffectRecord.new()
+		AudioServer.add_bus_effect(bus, rec_audio)
+	rec_audio.set_recording_active(false)
+	rec_audio.set_recording_active(true)
+
+
+func _rec_frame() -> void:
+	if rec_dir == "":
+		# the run turns into Double or Nothing at the pills, inside this scene: start then, once per scene
+		if ui["record"] and rm.endless and rec_scene != scene_id:
+			rec_scene = scene_id
+			_rec_start()
+		return
+	var now := Time.get_ticks_msec()
+	var every := REC_SLOW_MS if Engine.time_scale <= 1.0 else REC_FAST_MS
+	if now - rec_last_ms < every:
+		return
+	rec_last_ms = now
+	rec_frames += 1
+	var fname := "f_%06d.jpg" % rec_frames
+	get_viewport().get_texture().get_image().save_jpg(rec_dir.path_join(fname), 0.85)
+	rec_times.append("%s %d" % [fname, now - rec_t0])
+
+
+func _rec_stop(won: int) -> void:
+	var dir := rec_dir
+	rec_dir = ""
+	var wav: AudioStreamWAV = null
+	if rec_audio != null:
+		wav = rec_audio.get_recording()
+		rec_audio.set_recording_active(false)
+	var test: bool = ui.get("rec_test", false)
+	if not test and (won < REC_MIN_ROUNDS or won <= rec_best):
+		_rec_delete(dir)
+		return
+	if wav != null:
+		wav.save_to_wav(dir.path_join("sound.wav"))
+	var f := FileAccess.open(dir.path_join("times.txt"), FileAccess.WRITE)
+	f.store_string("\n".join(rec_times) + "\n")
+	f.close()
+	var root := _rec_root()
+	if test:  # `record test`: keep this one run aside, the record is not touched
+		ui["rec_test"] = false
+		DirAccess.rename_absolute(dir, root.path_join("test_%dr_%s" % [won, dir.get_file().trim_prefix("run_")]))
+		_write({"event": "test run kept: %d rounds" % won})
+		return
+	# the new record replaces the old one
+	for old in DirAccess.get_directories_at(root):
+		if old.begins_with("record_"):
+			_rec_delete(root.path_join(old))
+	var stamp := dir.get_file().trim_prefix("run_")
+	var kept := root.path_join("record_%dr_%s" % [won, stamp])
+	DirAccess.rename_absolute(dir, kept)
+	rec_best = won
+	var j := FileAccess.open(root.path_join("record.json"), FileAccess.WRITE)
+	j.store_string(JSON.stringify({"rounds": won, "folder": kept.get_file(), "prize": run_prize}))
+	j.close()
+	_write({"event": "record kept: %d rounds" % won, "folder": kept})
+	print("[bridge] record kept: ", won, " rounds -> ", kept)
+
+
+func _rec_delete(dir: String) -> void:
+	if dir == "" or not DirAccess.dir_exists_absolute(dir):
+		return
+	for f in DirAccess.get_files_at(dir):
+		DirAccess.remove_absolute(dir.path_join(f))
+	DirAccess.remove_absolute(dir)
+
+
 func _run_clean() -> bool:
 	return ui["dev_changes"] == run_dev_at and not run_cheat and run_ai
 
@@ -553,6 +688,8 @@ func _run_problem() -> String:
 
 # Called when the run's main scene gives way to the death scene.
 func _check_achievement() -> void:
+	_write({"event": "run over (death)", "prize": run_prize, "achievement_mode": ui["achievement"],
+			"counts": _run_clean()})
 	var text := ""
 	if run_prize <= ACH_PRIZE:
 		return  # the game wouldn't give it either

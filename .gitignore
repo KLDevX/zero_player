@@ -21,3 +21,4 @@ reports/live_thoughts/
 reports/distill/
 reports/*.json
 reports/ui/
+tools/
