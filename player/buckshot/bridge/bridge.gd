@@ -10,6 +10,12 @@ extends Node
 #   {"cmd": "act", "key": "..."} -> {"ok": true} or {"ok": false, "error": "..."}
 #   {"cmd": "speed", "x": 10}    -> keeps Engine.time_scale at x (overrides the game's slow-mo)
 #   {"cmd": "mute", "on": true}  -> mutes the master audio bus
+#   {"cmd": "thought", "thought": {...}} -> what the in-game interface shows on the right (hud.gd)
+#   {"cmd": "take_step"}         -> {"go": true} once per → press in step mode (the AI may make one move)
+#   {"cmd": "screenshot", "path": "C:/.../x.png"} -> saves the game's frame with the interface
+#   {"cmd": "key", "key": "F1", "ctrl": false} -> presses an interface key, as if typed (tests)
+# The state reply also carries "ui": AI on/off, auto or step mode, speed — set by the keys in the game:
+#   F1 AI on/off · → one move · Space auto/step · Ctrl+1…4 speed ×1/×3/×10/×20 · F6 interface style
 # An action is one click the player could make right now, performed through the game's own
 # InteractionManager.MainInteractionEvent(), the same path a mouse click takes.
 
@@ -23,6 +29,7 @@ const ITEMS_PATH := "res://scripts/ItemInteraction.gd"
 const TIMESCALE_PATH := "res://scripts/TimeScaleManager.gd"
 const PHONE_PATH := "res://scripts/BurnerPhone.gd"
 const BRANCH_PATH := "res://scripts/InteractionBranch.gd"
+const SPEEDS := [1.0, 3.0, 10.0, 20.0]
 # Clicks the bridge may make. Everything else (CRT, credits, heaven, menus) is left alone.
 const ALLOWED_ALIASES := [
 	"shotgun", "text you", "text dealer", "briefcase intake", "item", "double yes", "double no",
@@ -44,8 +51,8 @@ var log_file: FileAccess
 var last_state := ""
 var last_scan := 0
 var server := TCPServer.new()
-var peer: StreamPeerTCP = null
-var inbox := ""
+var peers: Array = []  # [{"tcp", "inbox", "brain"}]: the AI's brain plus test tools at once
+var serving: Dictionary = {}  # the peer whose command is being handled
 var target_scale := 1.0
 var observed_scale := 1.0  # time scale the last frame really ran at (before we set ours)
 var menu_started := false
@@ -63,6 +70,12 @@ var k_phone_wait := false     # burner phone used: read its message
 var k_fired: Array = []       # shells that left the gun this load, in order (public)
 var k_dealer_used := {}       # items the dealer used this load (public: you watch him do it)
 var k_table_prev := {}        # {"player": {...}, "dealer": {...}} item counts on the table last frame
+# The in-game interface (docs/ui-plan.md): drawn on a layer above the game, kept last under the root so
+# its keys are seen before the game's own (input goes to the last node first).
+var hud_layer: CanvasLayer
+var hud: Control
+var ui := {"ai_on": false, "auto": false, "steps": 0}
+var window_fix_at := -1  # when to re-enter fullscreen (ms); -1 = not yet planned, 0 = done
 
 
 func _ready() -> void:
@@ -78,6 +91,15 @@ func _ready() -> void:
 	var path := reports_dir.path_join("live_%s.jsonl" % stamp)
 	log_file = FileAccess.open(path, FileAccess.WRITE)
 	var err := server.listen(PORT, "127.0.0.1")
+	if OS.get_environment("BRIDGE_MUTE") == "1":
+		AudioServer.set_bus_mute(0, true)  # tests nobody watches: silent from the first frame
+	hud_layer = CanvasLayer.new()
+	hud_layer.layer = 100
+	hud = load(get_script().resource_path.get_base_dir().path_join("hud.gd")).new()
+	hud.bridge = self
+	hud.thought = {"status": "мозг ИИ не подключён: python -m player.buckshot.launch"}
+	hud_layer.add_child(hud)
+	get_tree().root.add_child.call_deferred(hud_layer)
 	print("[bridge] loaded, offline mode, logging to ", path, ", listening on 127.0.0.1:", PORT, " (", err, ")")
 	_write({"event": "bridge loaded"})
 
@@ -92,13 +114,18 @@ func _process(_delta: float) -> void:
 			if is_instance_valid(tsm):
 				tsm.moving = false
 		Engine.time_scale = target_scale
+	hud.ui = _ui_state()
+	_keep_window()
 	if not _scene_ok():
+		hud.public = {}
 		_rescan()
 		return
 	if rm == null:
+		hud.public = {}
 		return
 	_track_knowledge()
 	var state := {"public": _public(), "_hidden": _hidden()}
+	hud.public = state["public"] if rm.endless else {}
 	var key := JSON.stringify(state)
 	if key != last_state:
 		last_state = key
@@ -112,6 +139,8 @@ func _rescan() -> void:
 	last_scan = now
 	scene = get_tree().current_scene
 	scene_id = scene.get_instance_id() if scene != null else 0
+	if window_fix_at == -1 and scene != null:
+		window_fix_at = now + 1000
 	branches = []
 	branches_ms = 0
 	rm = null
@@ -143,6 +172,8 @@ func _rescan() -> void:
 			ITEMS_PATH: item_interaction = node
 			TIMESCALE_PATH: timescale_managers.append(node)
 			PHONE_PATH: phone = node
+	if hud_layer.get_parent() == get_tree().root:
+		get_tree().root.move_child(hud_layer, -1)
 	print("[bridge] scene ", scene.name, " rm=", rm != null, " im=", im != null, " menu=", menu != null)
 	_write({"event": "scene " + scene.name})
 
@@ -150,44 +181,68 @@ func _rescan() -> void:
 # --- commands -------------------------------------------------------------------------------
 
 func _serve() -> void:
-	if server.is_connection_available():
-		peer = server.take_connection()
-		inbox = ""
-		print("[bridge] python connected")
-	if peer == null:
-		return
-	peer.poll()
-	if peer.get_status() != StreamPeerTCP.STATUS_CONNECTED:
-		peer = null
-		return
-	var n := peer.get_available_bytes()
-	if n > 0:
-		inbox += peer.get_utf8_string(n)
-	while inbox.find("\n") != -1:
-		var cut := inbox.find("\n")
-		var line := inbox.substr(0, cut)
-		inbox = inbox.substr(cut + 1)
-		var msg = JSON.parse_string(line)
-		var reply: Dictionary = _handle(msg) if msg is Dictionary else {"ok": false, "error": "bad json"}
-		peer.put_data((JSON.stringify(reply) + "\n").to_utf8_buffer())
+	while server.is_connection_available():
+		peers.append({"tcp": server.take_connection(), "inbox": "", "brain": false})
+		print("[bridge] python connected (", peers.size(), ")")
+	for c in peers.duplicate():
+		var tcp: StreamPeerTCP = c["tcp"]
+		tcp.poll()
+		if tcp.get_status() != StreamPeerTCP.STATUS_CONNECTED:
+			peers.erase(c)
+			if c["brain"]:
+				hud.thought = {"status": "мозг ИИ отключился"}
+				ui["ai_on"] = false
+			continue
+		var n := tcp.get_available_bytes()
+		if n > 0:
+			c["inbox"] += tcp.get_utf8_string(n)
+		while c["inbox"].find("\n") != -1:
+			var cut: int = c["inbox"].find("\n")
+			var line: String = c["inbox"].substr(0, cut)
+			c["inbox"] = c["inbox"].substr(cut + 1)
+			var msg = JSON.parse_string(line)
+			serving = c
+			var reply: Dictionary = _handle(msg) if msg is Dictionary else {"ok": false, "error": "bad json"}
+			tcp.put_data((JSON.stringify(reply) + "\n").to_utf8_buffer())
 
 
 func _handle(msg: Dictionary) -> Dictionary:
 	match msg.get("cmd", ""):
 		"state":
 			if not _scene_ok():
-				return {"ok": true, "scene": "", "legal": []}
-			var reply := {"ok": true, "scene": scene.name if scene != null else "", "legal": _legal().keys()}
+				return {"ok": true, "scene": "", "legal": [], "ui": _ui_state()}
+			var reply := {"ok": true, "scene": scene.name if scene != null else "", "legal": _legal().keys(), "ui": _ui_state()}
 			if rm != null:
 				reply["public"] = _public()
 			return reply
 		"act":
 			return _act(str(msg.get("key", "")))
 		"speed":
-			target_scale = float(msg.get("x", 1.0))
-			Engine.time_scale = target_scale
-			Engine.max_physics_steps_per_frame = maxi(8, ceili(target_scale) * 2)
+			_set_speed(float(msg.get("x", 1.0)))
 			return {"ok": true, "x": target_scale}
+		"thought":
+			var t = msg.get("thought", {})
+			hud.thought = t if t is Dictionary else {}
+			serving["brain"] = true  # the peer that sends thoughts is the brain
+			return {"ok": true}
+		"screenshot":
+			# The game's own frame with the interface on it (no other windows): for checking the look.
+			var img := get_viewport().get_texture().get_image()
+			var err := img.save_png(str(msg.get("path", "")))
+			return {"ok": err == OK, "size": [img.get_width(), img.get_height()], "vp": get_viewport().get_visible_rect().size}
+		"key":
+			# Press an interface key as if typed in the game (for tests): {"key": "F1", "ctrl": false}
+			var ev := InputEventKey.new()
+			ev.keycode = OS.find_keycode_from_string(str(msg.get("key", "")))
+			ev.ctrl_pressed = bool(msg.get("ctrl", false))
+			ev.pressed = true
+			Input.parse_input_event(ev)
+			return {"ok": ev.keycode != KEY_NONE}
+		"take_step":
+			if ui["steps"] > 0:
+				ui["steps"] -= 1
+				return {"ok": true, "go": true}
+			return {"ok": true, "go": false}
 		"mute":
 			AudioServer.set_bus_mute(0, bool(msg.get("on", true)))
 			return {"ok": true}
@@ -196,9 +251,65 @@ func _handle(msg: Dictionary) -> Dictionary:
 			# overlay sit on top. Lab copy only.
 			var modes := {"borderless": DisplayServer.WINDOW_MODE_FULLSCREEN,
 						  "windowed": DisplayServer.WINDOW_MODE_WINDOWED}
-			DisplayServer.window_set_mode(modes.get(str(msg.get("mode", "borderless")), DisplayServer.WINDOW_MODE_FULLSCREEN))
-			return {"ok": true}
+			var mode := str(msg.get("mode", "borderless"))
+			if modes.has(mode):
+				DisplayServer.window_set_mode(modes[mode])
+			var screen := DisplayServer.window_get_current_screen()
+			return {"ok": true, "mode": DisplayServer.window_get_mode(), "pos": DisplayServer.window_get_position(),
+					"size": DisplayServer.window_get_size(), "screen_pos": DisplayServer.screen_get_position(screen),
+					"screen_size": DisplayServer.screen_get_size(screen), "screen_scale": DisplayServer.screen_get_scale(screen)}
 	return {"ok": false, "error": "unknown cmd"}
+
+
+# The game's exclusive fullscreen (OptionsManager.gd:143) can open shifted right and down, with part of the
+# picture off screen. Akel's fix: leave fullscreen and enter it again. Only once per game start, a second
+# after the first scene loads (the menu applies the game's window setting); windowed mode is left alone.
+func _keep_window() -> void:
+	if window_fix_at <= 0 or Time.get_ticks_msec() < window_fix_at:
+		return
+	window_fix_at = 0
+	if DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN:
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+		DisplayServer.window_set_mode.call_deferred(DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN)
+
+
+func _set_speed(x: float) -> void:
+	target_scale = x
+	Engine.time_scale = target_scale
+	Engine.max_physics_steps_per_frame = maxi(8, ceili(target_scale) * 2)
+
+
+func _ui_state() -> Dictionary:
+	return {"ai_on": ui["ai_on"], "auto": ui["auto"], "steps": ui["steps"], "speed": target_scale}
+
+
+# Keys of the in-game interface (hud.gd passes every key press here first). Returns true if the key was ours,
+# so the game doesn't also act on it (arrows and Space move the game's controller cursor otherwise).
+func on_key(event: InputEventKey) -> bool:
+	if not event.pressed or event.echo:
+		return false
+	if event.ctrl_pressed and event.keycode >= KEY_1 and event.keycode <= KEY_4:
+		_set_speed(SPEEDS[event.keycode - KEY_1])
+		return true
+	match event.keycode:
+		KEY_F1:
+			ui["ai_on"] = not ui["ai_on"]
+			ui["auto"] = false
+			ui["steps"] = 0
+			return true
+		KEY_F6:
+			hud.style_index = (hud.style_index + 1) % hud.STYLES.size()
+			return true
+		KEY_RIGHT:
+			if ui["ai_on"] and not ui["auto"]:
+				ui["steps"] = 1
+				return true
+		KEY_SPACE:
+			if ui["ai_on"]:
+				ui["auto"] = not ui["auto"]
+				ui["steps"] = 0
+				return true
+	return false
 
 
 # Returns {action key: InteractionBranch node} for every click the player could make right now.

@@ -52,6 +52,7 @@ A hotkey toggles an "advanced" panel.
   itself here?") and checkpoints can be compared move by move.
 
 ## Built: overlay v1 (2026-10-23) — lab copy with the bridge
+**Retired 2026-10-24:** replaced by the interface drawn inside the game (docs/ui-plan.md, `player/buckshot/ingame.py`).
 ```
 python -m player.buckshot.overlay --agent runs/d1/dqn_100000.pt                          # hint mode
 python -m player.buckshot.overlay --agent runs/d1/dqn_100000.pt --mode play --speed 1 --pause 1.5

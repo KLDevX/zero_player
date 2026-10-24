@@ -1,13 +1,15 @@
-"""One command: start the lab copy of the game with the bridge, wait for it, open the overlay.
+"""One command: start the lab copy of the game with the bridge, wait for it, start the AI's brain.
 
-    python -m player.buckshot.launch --agent runs/d3.1/dqn_100000.pt --mode play --speed 10
-    python -m player.buckshot.launch --agent runs/d3.1/dqn_100000.pt              # hint mode: you play
+    python -m player.buckshot.launch                                   # best model (dx1.5), AI off: you play
+    python -m player.buckshot.launch --agent runs/d3.1/dqn_100000.pt --speed 10
 
 Uses game_lab/game (a copy of the game; the Steam folder is never touched). Puts override.cfg there if it
-is missing, starts the game if it isn't running, waits until the bridge answers, then runs the overlay
-(same options as player.buckshot.overlay). F10 closes the overlay; the game keeps running.
+is missing, starts the game if it isn't running, waits until the bridge answers, then runs
+player.buckshot.ingame. The interface is drawn inside the game: F1 AI on/off, → one move, Space auto,
+Ctrl+1…4 speed, F6 style. Ctrl+C here stops the brain; the game keeps running.
 """
 import argparse
+import os
 import shutil
 import socket
 import subprocess
@@ -16,6 +18,7 @@ import time
 from pathlib import Path
 
 from player.buckshot.bridge.client import PORT
+from player.buckshot.ingame import DEFAULT_AGENT
 
 ROOT = Path(__file__).resolve().parents[2]
 GAME_DIR = ROOT / "game_lab" / "game"
@@ -38,9 +41,9 @@ def game_running() -> bool:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--agent", type=Path, required=True)
-    ap.add_argument("--mode", choices=("hint", "play"), default="hint")
+    ap.add_argument("--agent", type=Path, default=DEFAULT_AGENT)
     ap.add_argument("--speed", type=float, default=1.0)
+    ap.add_argument("--mute", action="store_true", help="no game sound (tests without a person watching)")
     ap.add_argument("--pause", type=float, default=1.5)
     args = ap.parse_args()
 
@@ -53,16 +56,17 @@ def main() -> None:
         print("override.cfg copied into the lab copy")
     if not game_running():
         print("starting the lab copy of the game…")
-        subprocess.Popen([str(EXE)], cwd=GAME_DIR, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        env = {**os.environ, "BRIDGE_MUTE": "1"} if args.mute else None
+        subprocess.Popen([str(EXE)], cwd=GAME_DIR, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
     for _ in range(120):
         if bridge_up():
             break
         time.sleep(0.5)
     else:
         sys.exit("the bridge didn't answer in 60 s: is the game open? is override.cfg in game_lab/game?")
-    print(f"bridge is up; overlay: {args.mode} mode, agent {args.agent}, speed x{args.speed:g} (F8 details, F10 quit)")
-    cmd = [sys.executable, "-m", "player.buckshot.overlay", "--agent", str(args.agent), "--mode", args.mode,
-           "--speed", str(args.speed), "--pause", str(args.pause)]
+    print(f"bridge is up; brain: {args.agent}, speed x{args.speed:g}")
+    cmd = [sys.executable, "-m", "player.buckshot.ingame", "--agent", str(args.agent),
+           "--speed", str(args.speed), "--pause", str(args.pause)] + (["--mute"] if args.mute else [])
     subprocess.run(cmd, cwd=ROOT)
 
 

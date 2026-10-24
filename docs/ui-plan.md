@@ -1,4 +1,4 @@
-# In-game AI interface — plan (agreed with Akel 2026-10-24, not started)
+# In-game AI interface — plan (agreed with Akel 2026-10-24; step 1 built)
 
 Replaces the tkinter overlay: the bridge (a Godot autoload in the lab copy) draws the interface **inside the
 game** with the game's own fonts and colours; Python stays the brain (dx1.5 for fast play, x1 for hints)
@@ -38,3 +38,23 @@ and sends each thought to the bridge. Lab copy only, leaderboard off, single pla
 5. Settings menu (Esc → AI), `settings.json`, start-up safety check (lab copy, leaderboard off),
    a simulator sandbox with real undo for reviewing games.
 Later: the AI's voice (short spoken-style lines, then the conversation "brain" via API).
+
+## Built: step 1 (2026-10-24)
+- `player/buckshot/bridge/hud.gd` draws both panels inside the game (a CanvasLayer above it, drawn with
+  `_draw()` in the game's 960×540 frame, so it is pixelated like the game). Fonts from the pack with
+  Cyrillic: Fake Receipt Cyr («чек»), DOTMATRI Ver2_2 («табло»), RobotoSlab Cyrillic («плита»); F6 cycles
+  them until Akel picks one. Shell colours from `GlobalVariables` (colour-blind palette when it is on).
+- Left: shells as coloured pips, the chambered shell (also "по счёту" when the unseen ones are one colour —
+  interface only, the agent's input is unchanged), known later shells, shells fired, items the dealer used,
+  HP, saw/cuffs. Right: AI mode and speed, the advice / the AI's move, chance to win the round, the next
+  two moves, status.
+- Keys go through `bridge.on_key()`; the HUD layer is kept last under the root, so its keys come before the
+  game's and are swallowed (arrows and Space would move the game's controller cursor).
+- `player/buckshot/ingame.py` is the brain (replaces the tkinter overlay); `launch.py` starts it.
+  Bridge commands added: `thought`, `take_step`, `screenshot`, `key`; the state reply carries `ui`.
+  Several Python connections at once (brain + test tools).
+- Exclusive fullscreen sometimes opens shifted right/down: the bridge leaves it and enters it again, once
+  per game start (Akel's fix). `--mute` / `BRIDGE_MUTE=1` for tests nobody watches.
+- Tested on the game (muted): menus walked with F1 on, → made one move (phone → «№2 холостой»), Space at
+  ×10 played to the end, game saved as `dx1.5@991956` (3 rounds survived, 52 AI moves). Hint mode with F1
+  off shows advice. Screenshots: `reports/ui/` (git-ignored).

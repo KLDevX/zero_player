@@ -1,4 +1,4 @@
-"""Check games played on the real game through the overlay: did the agent see the table correctly?
+"""Check games played on the real game through the in-game interface: did the agent see the table correctly?
 
     python -m player.buckshot.livecheck [reports/live_thoughts/<file>.jsonl]   (default: the newest file)
 
@@ -43,7 +43,7 @@ def main() -> None:
     files = sorted((ROOT / "reports" / "live_thoughts").glob("*.jsonl"))
     path = Path(sys.argv[1]) if len(sys.argv) > 1 else (files[-1] if files else None)
     if path is None:
-        raise SystemExit("no live games logged yet: play with python -m player.buckshot.overlay")
+        raise SystemExit("no live games logged yet: play with python -m player.buckshot.launch")
     recs = [json.loads(line) for line in path.open(encoding="utf-8")]
     problems, choices, offered = Counter(), Counter(), Counter()
     examples = {}

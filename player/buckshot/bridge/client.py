@@ -32,8 +32,16 @@ class Bridge:
         return self._call(cmd="mute", on=on)
 
     def window(self, mode: str = "borderless") -> dict:
-        """borderless | windowed — exclusive fullscreen would hide the overlay."""
+        """borderless | windowed."""
         return self._call(cmd="window", mode=mode)
+
+    def thought(self, view: dict) -> dict:
+        """What the in-game interface shows on the right: move, chance, alternatives, status."""
+        return self._call(cmd="thought", thought=view)
+
+    def take_step(self) -> bool:
+        """True once per → press in step mode: the AI may make one move."""
+        return bool(self._call(cmd="take_step").get("go"))
 
     def close(self) -> None:
         self.sock.close()
