@@ -104,3 +104,16 @@ Later: the AI's voice (short spoken-style lines, then the conversation "brain" v
   `cheat order`. Games are saved as «(dev)» / «(cheats)»; dev commands are not counted as your moves.
   `give` is not built (adding a 3D item to the table needs more work).
 - Tested on the game, muted: all of the above; `kill dealer` went on to round 2 without freezing.
+
+## Built: money line and ach10 (2026-10-25)
+- Shell panel header: «приз» (first cycle: «≈» = 70 000 − timer/600 s × 40 000, live) and «раунд a/b» =
+  rounds won / rounds needed for a prize over 1 000 000. The timer counts game time from the waiver to the end
+  of round 3, so ×20 doesn't help; the bot's own waits and the AI's item use cost prize. Threshold: a first
+  prize ≥ 31 250 needs 18 rounds instead of 21.
+- `achievement on|off`: the bridge unlocks only "ach10" (DeathManager.gd:143 rule) through Steam when the run
+  goes to the death scene with a prize over 1 000 000, and only if [F1] was on all run, no dev commands, no
+  cheats (Akel: the achievement should be his own AI's). Leaderboard stays off (using_steam = false).
+  Tested: status, the clean/not-clean check; the unlock itself waits for a real AI run.
+- Game seed (answered, not built): the game uses Godot's global RNG only (no randomize()/RNG objects), so the
+  bridge could seed each load; cosmetic randomness every frame makes later situations differ. Identical
+  situations: the simulator's seeds.

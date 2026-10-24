@@ -80,12 +80,23 @@ var k_table_prev := {}        # {"player": {...}, "dealer": {...}} item counts o
 var hud_layer: CanvasLayer
 var hud: Control
 var ui := {"ai_on": false, "auto": false, "steps": 0, "panel_i": false, "panel_n": false, "cheat": false,
-		   "model_req": "", "dev_changes": 0}
+		   "model_req": "", "dev_changes": 0, "achievement": false}
+# The one achievement the bridge may give (Akel's choice): "ach10", dying in Double or Nothing with a prize
+# over 1 000 000 — the game's own rule (DeathManager.gd:143). The game itself can't give it here, because the
+# bridge switches Steam off (using_steam = false) so nothing reaches the leaderboard; the leaderboard stays
+# off. Only with `achievement on`, and only for the AI's own run: [F1] on all the way, no table-changing
+# commands, no cheats.
+const ACH_PRIZE := 1000000
+var run_dev_at := 0        # dev_changes when this run (the main scene) began
+var run_cheat := false     # `cheat order` was on at the table during this run
+var run_ai := true         # the AI was on ([F1]) the whole run: only then it's the AI's achievement
+var run_endless := false   # what the last frame of the run looked like
+var run_prize := 0
 const HELP := """model <имя> · models · speed <x> · ai on|off · auto on|off
 hp <n> · hp dealer <n> · kill dealer (в твой ход)
 shells live blank … · remove <предмет> [dealer]
 cheat order — видеть порядок патронов · i · n
-mute · unmute · clear"""
+achievement on|off — выдать «1 000 000 и умер» за чистую партию · mute · unmute · clear"""
 const ITEM_NAMES := {"наручники": "handcuffs", "пиво": "beer", "лупа": "magnifying glass", "сигареты": "cigarettes",
 		"пила": "handsaw", "лекарство": "expired medicine", "инвертор": "inverter", "телефон": "burner phone",
 		"адреналин": "adrenaline"}
@@ -136,8 +147,19 @@ func _process(_delta: float) -> void:
 		hud.public = {}
 		return
 	_track_knowledge()
+	run_endless = rm.endless
+	run_prize = int(rm.endscore) if rm.endscore != null else 0
+	run_cheat = run_cheat or (ui["cheat"] and rm.endless)
+	run_ai = run_ai and (ui["ai_on"] or not rm.endless)
 	var state := {"public": _public(), "_hidden": _hidden()}
 	hud.public = state["public"] if rm.endless else {}
+	if rm.endless:
+		# for the money line only (not part of what the agent sees): the first prize and its timer
+		# (RoundManager.gd:385-396: 70 000 − timer / 600 s × 40 000, counted from the waiver to the 3rd round)
+		var shown: Dictionary = state["public"].duplicate()  # (Dictionary.merged() is newer than Godot 4.1)
+		shown.merge({"don_initial": rm.double_or_nothing_initial_score, "don_timer": rm.initial_time,
+				"don_counting": rm.counting})
+		hud.public = shown
 	# cheats: the real order, for the screen only — never in a reply to Python
 	hud.cheat_order = state["_hidden"]["sequence"] if ui["cheat"] and rm.endless else []
 	var key := JSON.stringify(state)
@@ -151,7 +173,12 @@ func _rescan() -> void:
 	if now - last_scan < SCAN_INTERVAL_MS:
 		return
 	last_scan = now
-	scene = get_tree().current_scene
+	var next := get_tree().current_scene
+	if next != null:
+		if run_endless and (next.name.to_lower().contains("death") or next.scene_file_path.contains("death")):
+			_check_achievement()
+		run_endless = false  # (a null scene is the moment between two scenes: keep the run until the next one)
+	scene = next
 	scene_id = scene.get_instance_id() if scene != null else 0
 	branches = []
 	branches_ms = 0
@@ -186,6 +213,11 @@ func _rescan() -> void:
 			PHONE_PATH: phone = node
 	if hud_layer.get_parent() == get_tree().root:
 		get_tree().root.move_child(hud_layer, -1)
+	if rm != null:
+		run_dev_at = ui["dev_changes"]  # a new run begins
+		run_cheat = false
+		run_ai = true
+		run_prize = 0
 	print("[bridge] scene ", scene.name, " rm=", rm != null, " im=", im != null, " menu=", menu != null)
 	_write({"event": "scene " + scene.name})
 
@@ -429,6 +461,17 @@ func _console(line: String) -> void:
 			_cmd_shells(words.slice(1))
 		"remove":
 			_cmd_remove(words.slice(1))
+		"achievement":
+			if arg == "on" or arg == "off":
+				ui["achievement"] = arg == "on"
+			var state := "выкл"
+			if ui["achievement"]:
+				state = "вкл"
+			hud.log_line("достижение «1 000 000 и умер»: " + state + " · партия " + ("засчитается" if _run_clean() else
+					"не засчитается: " + _run_problem()))
+			if Engine.has_singleton("Steam"):
+				var got: Dictionary = Steam.getAchievement("ach10")
+				hud.log_line("в Steam: " + ("уже получено" if got.get("achieved", false) else "ещё нет"))
 		"mute", "unmute":
 			AudioServer.set_bus_mute(0, cmd == "mute")
 			hud.log_line("звук " + ("выкл" if cmd == "mute" else "вкл"))
@@ -436,6 +479,40 @@ func _console(line: String) -> void:
 			hud.console_log = []
 		_:
 			hud.log_line("неизвестная команда: " + cmd + " (help)")
+
+
+func _run_clean() -> bool:
+	return ui["dev_changes"] == run_dev_at and not run_cheat and run_ai
+
+
+func _run_problem() -> String:
+	if ui["dev_changes"] != run_dev_at:
+		return "были команды (dev)"
+	if run_cheat:
+		return "были читы"
+	if not run_ai:
+		return "ИИ был выключен"
+	return ""
+
+
+# Called when the run's main scene gives way to the death scene.
+func _check_achievement() -> void:
+	var text := ""
+	if run_prize <= ACH_PRIZE:
+		return  # the game wouldn't give it either
+	if not ui["achievement"]:
+		text = "приз %d, но выдача выключена (achievement on)" % run_prize
+	elif not _run_clean():
+		text = "приз %d, но не засчитано: %s" % [run_prize, _run_problem()]
+	elif not Engine.has_singleton("Steam"):
+		text = "Steam недоступен"
+	else:
+		Steam.setAchievement("ach10")
+		Steam.storeStats()
+		text = "выдано достижение «1 000 000 и умер» (приз %d)" % run_prize
+	print("[bridge] ach10: ", text)
+	hud.log_line(text)
+	_write({"event": "ach10: " + text})
 
 
 # --- developer commands that change the table (the game is then saved as «(dev)») ---------------

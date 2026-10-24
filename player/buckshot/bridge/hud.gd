@@ -310,8 +310,22 @@ func _left(at: Vector2) -> float:
 	var col := x + 84
 	var right := r.end.x - PAD
 	var y := at.y + PAD
-	_text(x, y, "ПАТРОНЫ", SMALL, DIM)
-	_text_r(right, y, "раунд %d · заряд %d" % [maxi(1, int(p.get("rounds_beat", 1))), int(p.get("load", 0)) + 1], SMALL, DIM)
+	# money and rounds: rounds won / rounds needed for a prize over 1 000 000 (the first prize sets it)
+	var prize := int(p.get("don_prize", 0))
+	var first := int(p.get("don_initial", 0))
+	if first <= 0 and p.get("don_counting", false):
+		first = maxi(10, 70000 - int(float(p.get("don_timer", 0.0)) / 600.0 * 40000.0))  # falls while you play
+	var won := maxi(0, int(p.get("rounds_beat", 1)) - 1)
+	var w := _text(x, y, "приз ", SMALL, DIM)
+	if prize > 0:
+		_text(x + w, y, _money(prize), SMALL, ACCENT if prize > ACH_PRIZE else TEXT)
+	elif first > 0:
+		_text(x + w, y, "≈" + _money(first), SMALL, DIM)
+	else:
+		_text(x + w, y, "—", SMALL, OFF)
+	var need := _rounds_for_million(first)
+	_text_r(right, y, "раунд %d/%s · заряд %d" % [won, str(need) if need > 0 else "?", int(p.get("load", 0)) + 1],
+			SMALL, DIM)
 	y += _lh(SMALL)
 	# 1) which shells are in the gun at all; 2) their order — grey unknown, coloured known, darker counted,
 	# the yellow line under the chambered one; 3) the ones that left the gun. One size and step for all.
@@ -350,7 +364,7 @@ func _left(at: Vector2) -> float:
 	y += row
 	var max_hp := int(p.get("load_info", {}).get("max_hp", 0))
 	_text(x, y, "жизни:", S, DIM)
-	var w := _text(col, y, "ты ", S, DIM)
+	w = _text(col, y, "ты ", S, DIM)
 	_hp(col + w, y, int(p.get("hp_player", 0)), max_hp)
 	w = _text(col + 66, y, "дилер ", S, DIM)
 	_hp(col + 66 + w, y, int(p.get("hp_dealer", 0)), max_hp)
@@ -579,6 +593,28 @@ func _dev(vp: Vector2) -> void:
 	y = r.end.y - PAD - lh
 	var cursor := "_" if int(Time.get_ticks_msec() / 500) % 2 == 0 else " "
 	_text(x, y, "> " + console_line + cursor, S, TEXT, inner)
+
+
+const ACH_PRIZE := 1000000
+
+
+# Rounds to win for a prize over 1 000 000: each cycle of 3 rounds doubles the first prize.
+func _rounds_for_million(first: int) -> int:
+	if first <= 0:
+		return -1
+	var k := 0
+	while first * pow(2, k) <= ACH_PRIZE:
+		k += 1
+	return 3 * (k + 1)
+
+
+func _money(n: int) -> String:
+	var t := str(n)
+	var out := ""
+	while t.length() > 3:
+		out = " " + t.substr(t.length() - 3) + out
+		t = t.substr(0, t.length() - 3)
+	return t + out
 
 
 func _num(x) -> String:
