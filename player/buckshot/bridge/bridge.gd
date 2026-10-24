@@ -104,6 +104,9 @@ var rec_audio: AudioEffectRecord = null
 var rec_best := 0          # rounds of the kept record (read from reports/ui/recordings/record.json)
 var run_won := 0           # rounds won in this run, for the recording
 var rec_scene := 0         # the scene whose run is (or was) recorded
+# The player's HP hit 0 in this run. The death screen itself is never seen: in Double or Nothing the game
+# loads the next table in the same frame.
+var run_dead := false
 # The one achievement the bridge may give (Akel's choice): "ach10", dying in Double or Nothing with a prize
 # over 1 000 000 — the game's own rule (DeathManager.gd:143). The game itself can't give it here, because the
 # bridge switches Steam off (using_steam = false) so nothing reaches the leaderboard; the leaderboard stays
@@ -178,6 +181,7 @@ func _process(_delta: float) -> void:
 		return
 	_track_knowledge()
 	run_endless = rm.endless
+	run_dead = run_dead or (rm.endless and rm.health_player <= 0)
 	run_prize = int(rm.endscore) if rm.endscore != null else 0
 	run_cheat = run_cheat or (ui["cheat"] and rm.endless)
 	run_ai = run_ai and (ui["ai_on"] or not rm.endless)
@@ -206,9 +210,11 @@ func _rescan() -> void:
 	# before the next scan (it was: main → death → main with no scan in between).
 	var next := get_tree().current_scene
 	if next != null and next.get_instance_id() != scene_id:
+		_write({"event": "new scene", "name": next.name, "path": next.scene_file_path, "run_endless": run_endless,
+				"prize": run_prize})
 		if rec_dir != "":
 			_rec_stop(run_won)
-		if run_endless and (next.name.to_lower().contains("death") or next.scene_file_path.contains("death")):
+		if run_endless and (run_dead or next.name.to_lower().contains("death") or next.scene_file_path.contains("death")):
 			_check_achievement()
 		run_endless = false  # (a null scene is the moment between two scenes: keep the run until the next one)
 	var now := Time.get_ticks_msec()
@@ -259,6 +265,7 @@ func _rescan() -> void:
 		get_tree().root.move_child(hud_layer, -1)
 	if rm != null:
 		run_dev_at = ui["dev_changes"]  # a new run begins
+		run_dead = false
 		run_cheat = false
 		run_ai = true
 		run_prize = 0
@@ -617,7 +624,10 @@ func _rec_frame() -> void:
 			_rec_start()
 		return
 	var now := Time.get_ticks_msec()
-	var every := REC_SLOW_MS if Engine.time_scale <= 1.0 else REC_FAST_MS
+	# 15 frames a second only in the slowed record part: in the first cycle choices run at ×1 and every frame
+	# grabbed costs a little game time of the prize timer
+	var slow: bool = rm.endless and run_won >= maxi(REC_MIN_ROUNDS - 1, rec_best)
+	var every := REC_SLOW_MS if slow else REC_FAST_MS
 	if now - rec_last_ms < every:
 		return
 	rec_last_ms = now
