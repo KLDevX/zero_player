@@ -13,7 +13,8 @@ from player.buckshot.sim import DOUBLE_NO, DOUBLE_YES, ITEMS, SHOOT_DEALER, SHOO
 
 # One agent action = these clicks, in order (bridge action keys).
 SHOT_CLICKS = {SHOOT_SELF: ["shotgun", "text you"], SHOOT_DEALER: ["shotgun", "text dealer"]}
-SETTLE_GAME_SECONDS = 0.6  # wait until the clickable set is stable, like a human reaction (feasibility §8)
+SETTLE_GAME_SECONDS = 0.6  # without the bridge's busy signal: wait until the clickable set is stable this long
+FREE_GAME_SECONDS = 0.1    # with it: the game must be free (no one-shot animation, camera still) this long
 
 
 def observation(public: dict, legal_keys: list[str]) -> tuple[dict | None, list[str]]:
@@ -65,9 +66,10 @@ def clicks_for(action: str) -> list[str]:
 
 
 class LiveGame:
-    def __init__(self, bridge: Bridge, speed: float = 1.0):
+    def __init__(self, bridge: Bridge, speed: float = 1.0, on_refused=None):
         self.bridge = bridge
         self.speed = speed
+        self.on_refused = on_refused  # called with a dict for every click the game refused or never allowed
 
     def read(self) -> tuple[dict, dict | None, list[str]]:
         st = self.bridge.state()
@@ -75,18 +77,28 @@ class LiveGame:
         return st, obs, legal
 
     def click_when_ready(self, key: str, timeout: float = 20.0) -> bool:
-        """Wait until `key` is clickable and the clickable set has been stable for a moment, then click.
-        The moment is in game time: the bridge says how fast the game runs right now (×1 while choosing)."""
-        prev, since, start = None, time.time(), time.time()
+        """Click `key` as soon as the game is free: the key is clickable, the clickable set and the bridge's busy
+        signal (camera turning, a one-shot animation playing) have been quiet for a moment. Old bridges without
+        the busy signal: the clickable set must be stable for SETTLE_GAME_SECONDS. Times are game time: the bridge
+        says how fast the game runs right now (×1 while choosing)."""
+        prev, since, start, busy = None, time.time(), time.time(), None
         while time.time() - start < timeout:
             st = self.bridge.state()
             legal = st.get("legal", [])
+            busy = st.get("busy")
             scale = float(st.get("ui", {}).get("scale_now", self.speed)) or self.speed
-            if legal != prev:
-                prev, since = legal, time.time()
-            if key in legal and time.time() - since >= SETTLE_GAME_SECONDS / scale:
-                return bool(self.bridge.act(key).get("ok"))
-            time.sleep(0.02)
+            if (legal, busy) != prev:
+                prev, since = (legal, busy), time.time()
+            wait = SETTLE_GAME_SECONDS if busy is None else FREE_GAME_SECONDS
+            if key in legal and not busy and time.time() - since >= wait / scale:
+                reply = self.bridge.act(key)
+                if not reply.get("ok") and self.on_refused:
+                    self.on_refused({"key": key, "why": reply.get("error"), "legal": legal, "busy": busy})
+                return bool(reply.get("ok"))
+            time.sleep(0.01)
+        if self.on_refused:
+            self.on_refused({"key": key, "why": f"not clickable for {timeout:g} s", "legal": prev[0] if prev else [],
+                             "busy": busy})
         return False
 
     def perform(self, action: str) -> bool:

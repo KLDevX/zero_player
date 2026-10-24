@@ -73,6 +73,7 @@ class Brain:
         log_dir.mkdir(parents=True, exist_ok=True)
         self.log_path = log_dir / f"{datetime.now():%Y-%m-%dT%H-%M-%S}_ingame_{agent_path.parent.name}.jsonl"
         self.sent = ""
+        self.pending = None  # the game being played, as it would be saved if the window closed now
 
     def _load(self, agent_path: Path) -> None:
         self.agent = load_agent(agent_path, seed=0)
@@ -125,6 +126,13 @@ class Brain:
                     edges.append([li, int(i), int(j), round(float(contrib[j, i] / top), 2)])
         return {"layers": [[round(float(v), 2) for v in layer] for layer in layers], "edges": edges,
                 "legal": [ACTION_INDEX[a] for a in thought.legal], "choice": choice}
+
+    def _refused(self, info: dict) -> None:
+        """A click the game refused (or never allowed): logged with the thoughts, so we can see why."""
+        record = {"time": datetime.now().isoformat(timespec="milliseconds"), "event": "click refused", **info}
+        with self.log_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        print(f"click refused: {info['key']} ({info['why']}), busy: {info.get('busy')}")
 
     def _log(self, thought, st: dict, ui: dict) -> None:
         record = {"time": datetime.now().isoformat(timespec="milliseconds"),
@@ -191,7 +199,7 @@ class Brain:
 
     def run(self) -> None:
         bridge = Bridge()
-        game = LiveGame(bridge, speed=self.speed)
+        game = LiveGame(bridge, speed=self.speed, on_refused=self._refused)
         bridge.speed(self.speed)
         bridge.mute(self.mute)
         self._dev_info(bridge)
@@ -199,7 +207,7 @@ class Brain:
               "[I] why, [N] network, [F11] fullscreen, [~] developer mode")
         last_key, thought, shown_at, typed, last_choice = None, None, 0.0, [], ""
         started, last_obs, ai_moves, your_moves, cheated, dev_at_start = None, None, 0, 0, False, 0
-        restarts_at_start = 0
+        restarts_at_start, last_pub, game_scene = 0, {}, None
         dev_now = 0
         while True:
             st, obs, legal = game.read()
@@ -213,8 +221,14 @@ class Brain:
                 started, ai_moves, your_moves, cheated = time.time(), 0, 0, False
                 dev_at_start = int(ui.get("dev_changes", 0))
                 restarts_at_start = int(ui.get("restarts", 0))
+                game_scene = st.get("scene_id")
             cheated = cheated or bool(ui.get("cheat") and obs is not None)
-            if obs is None and started is not None and last_obs is not None:  # left the table: game over
+            scene = st.get("scene", "")
+            # the game is over when the table scene gives way to another (death, a restart, the menu); between rounds
+            # the table has no load for a moment, which used to cut one run into several games.
+            # A new table scene (at ×20 the death screen can pass between two looks) also ends the game
+            new_scene = obs is not None and st.get("scene_id") not in (None, game_scene)
+            if (scene not in ("main", "") or new_scene) and started is not None and last_obs is not None:
                 rounds = last_obs["rounds_beat"]
                 who = self.name if your_moves == 0 else (f"akel (hints {self.name})" if ai_moves == 0
                                                          else f"akel + {self.name}")
@@ -223,13 +237,22 @@ class Brain:
                 save_game({"finished_at": datetime.now().isoformat(timespec="seconds"), "bot": who,
                            "speed": float(ui.get("speed", 1.0)), "seconds": round(time.time() - started, 1),
                            "actions": ai_moves + your_moves, "rounds_beat": rounds + 1, "rounds_survived": rounds,
-                           "don_cycles_beat": (st.get("public") or {}).get("don_cycles_beat", 0),
-                           "don_prize": 0,
+                           "don_cycles_beat": int(last_pub.get("don_cycles_beat", 0)),
+                           "don_prize": int(last_pub.get("don_prize", 0) or 0),
                            "end": "restart" if int(ui.get("restarts", 0)) > restarts_at_start else "death"})
                 print(f"game saved: {who}, rounds survived {rounds} (AI moves {ai_moves}, yours {your_moves})")
                 started, last_obs = None, None
+                continue  # look again: the new table, if any, starts a new game
             if obs is not None:
-                last_obs = obs
+                last_obs, last_pub = obs, st.get("public") or {}
+            # if the game window is closed now (Alt+F4), this game is still saved, as «closed»
+            self.pending = None if started is None or last_obs is None else {
+                "finished_at": datetime.now().isoformat(timespec="seconds"), "bot": self.name if your_moves == 0
+                else f"akel + {self.name}", "speed": float(ui.get("speed", 1.0)),
+                "seconds": round(time.time() - started, 1), "actions": ai_moves + your_moves,
+                "rounds_beat": last_obs["rounds_beat"] + 1, "rounds_survived": last_obs["rounds_beat"],
+                "don_cycles_beat": int(last_pub.get("don_cycles_beat", 0)),
+                "don_prize": int(last_pub.get("don_prize", 0) or 0), "end": "closed"}
             if obs is not None and legal:
                 key = json.dumps([obs, legal], sort_keys=True)
                 if key != last_key:
@@ -273,10 +296,14 @@ def main() -> None:
     ap.add_argument("--mute", action="store_true", help="no game sound (tests without a person watching)")
     ap.add_argument("--pause", type=float, default=1.5, help="auto mode: game seconds to show a thought before acting")
     args = ap.parse_args()
+    brain = Brain(args.agent, args.speed, args.pause, args.mute)
     try:
-        Brain(args.agent, args.speed, args.pause, args.mute).run()
+        brain.run()
     except ConnectionError as e:
         print(f"the game closed the connection: {e}")
+        if brain.pending:
+            save_game(brain.pending)
+            print(f"game saved as closed: rounds survived {brain.pending['rounds_survived']}")
 
 
 if __name__ == "__main__":

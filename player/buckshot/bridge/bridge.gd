@@ -34,6 +34,9 @@ const ITEMS_PATH := "res://scripts/ItemInteraction.gd"
 const TIMESCALE_PATH := "res://scripts/TimeScaleManager.gd"
 const PHONE_PATH := "res://scripts/BurnerPhone.gd"
 const RESET_PATH := "res://scripts/ResetManager.gd"
+const CAMERA_PATH := "res://scripts/CameraManager.gd"
+const AMBIENT := ["light", "animator_pp"]  # animators that play now and then for the mood (flicker, fades)
+const SHOTGUN_READY := 0.6  # game seconds into "player grab shotgun" when the target may be clicked
 const BRANCH_PATH := "res://scripts/InteractionBranch.gd"
 const SPEEDS := [1.0, 3.0, 10.0, 20.0]
 # Clicks the bridge may make. Everything else (CRT, credits, heaven, menus) is left alone.
@@ -64,6 +67,8 @@ var observed_scale := 1.0  # time scale the last frame really ran at (before we 
 var menu_started := false
 var phone: Node = null
 var reset_manager: Node = null  # the game's own restart (hold R for 0.8 s)
+var camera: Node = null         # CameraManager: `moving` while the camera turns (to the dealer, back home)
+var anim_players: Array = []    # every AnimationPlayer: a one-shot animation playing = the game is busy
 # What the player can know, tracked from what happens on screen (the same fields as the simulator's
 # observation): shells seen leaving the gun, inversions, the player's own magnifier and phone.
 var k_prev: Array = []        # the gun last frame
@@ -199,6 +204,8 @@ func _rescan() -> void:
 	timescale_managers = []
 	phone = null
 	reset_manager = null
+	camera = null
+	anim_players = []
 	k_prev = []
 	k_knows = []
 	k_fired = []
@@ -208,6 +215,8 @@ func _rescan() -> void:
 	if scene == null:
 		return
 	for node in scene.find_children("*", "", true, false):
+		if node is AnimationPlayer:
+			anim_players.append(node)
 		var script = node.get_script()
 		if script == null:
 			continue
@@ -222,6 +231,7 @@ func _rescan() -> void:
 			TIMESCALE_PATH: timescale_managers.append(node)
 			PHONE_PATH: phone = node
 			RESET_PATH: reset_manager = node
+			CAMERA_PATH: camera = node
 	if hud_layer.get_parent() == get_tree().root:
 		get_tree().root.move_child(hud_layer, -1)
 	if rm != null:
@@ -266,7 +276,8 @@ func _handle(msg: Dictionary) -> Dictionary:
 		"state":
 			if not _scene_ok():
 				return {"ok": true, "scene": "", "legal": [], "ui": _ui_state()}
-			var reply := {"ok": true, "scene": scene.name if scene != null else "", "legal": _legal().keys(), "ui": _ui_state()}
+			var reply := {"ok": true, "scene": scene.name if scene != null else "", "legal": _legal().keys(), "ui": _ui_state(),
+						  "busy": _busy(), "scene_id": scene_id}
 			if rm != null:
 				reply["public"] = _public()
 			return reply
@@ -334,12 +345,13 @@ func _toggle_fullscreen() -> void:
 		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
 
 
-# Speed-up is for the game's animations only: while the cursor is shown somebody is choosing a move, and the
-# game runs at its normal ×1, so a choice costs as much game time as it takes (at ×20 every real millisecond
-# of the bot's reaction cost 20 ms of the prize timer; 189 game-seconds per first cycle). `realtime off` in
-# the console switches it off.
+# While the first prize's timer runs (waiver → end of round 3), speed-up is for the game's animations only:
+# when the cursor is shown somebody is choosing a move, and the game runs at its normal ×1, so a choice costs
+# as much game time as it takes (at ×20 every real millisecond of the bot's reaction cost 20 ms of the prize
+# timer; 189 game-seconds per first cycle). After that the prize is set and everything runs at ×N (Akel).
+# `realtime off` in the console switches it off.
 func _wanted_scale() -> float:
-	if ui["realtime"] and cursor != null and is_instance_valid(cursor) and cursor.cursor_visible and _scene_ok():
+	if ui["realtime"] and rm != null and _scene_ok() and rm.counting and cursor != null and is_instance_valid(cursor) 			and cursor.cursor_visible:
 		return 1.0
 	return target_scale
 
@@ -708,6 +720,26 @@ func _legal() -> Dictionary:
 			continue
 		legal[key] = node
 	return legal
+
+
+# What keeps the game busy right now: "" when it is free. Hands, dealer, items and camera turns are played
+# by AnimationPlayers and the CameraManager; looping ones (lights, idle sway) are background and don't count.
+# The bot clicks when the game is free, instead of waiting a fixed moment (docs/ui-plan.md).
+func _busy() -> String:
+	# CameraManager never clears `moving` (CameraManager.gd:84-95): the turn is over when elapsed reaches dur
+	if camera != null and is_instance_valid(camera) and camera.moving and camera.elapsed < camera.dur:
+		return "camera"
+	for ap in anim_players:
+		if not is_instance_valid(ap) or not ap.is_playing() or AMBIENT.any(func(a): return ap.name.contains(a)):
+			continue
+		var anim: Animation = ap.get_animation(ap.current_animation) if ap.current_animation != "" else null
+		# raising the shotgun plays 5 s, but the target can be chosen long before; the old fixed 0.6 s wait was
+		# always enough (clicking 0.05 s after the grab froze the game)
+		if ap.current_animation == "player grab shotgun" and ap.current_animation_position >= SHOTGUN_READY:
+			continue
+		if anim != null and anim.loop_mode == Animation.LOOP_NONE:
+			return "%s:%s" % [ap.name, ap.current_animation]
+	return ""
 
 
 func _scene_ok() -> bool:

@@ -126,3 +126,16 @@ Later: the AI's voice (short spoken-style lines, then the conversation "brain" v
   21 078 → 41 711 (one clean AI run). Faster doesn't help ach10 any more: 31 250…62 500 all need 18 rounds.
 - Achievement mode restarts a run as soon as the live first-prize estimate falls under 31 250 (the game's own
   reset, the same as holding R; not a dev command). Such games are saved with end «restart».
+
+## Built: busy signal, refused clicks, game records (2026-10-25)
+- ×1 only while the first prize's timer runs (Akel: after the first cycle the prize is set).
+- The bridge's state reply has `busy`: what keeps the game busy ("" = free) — the camera turning
+  (CameraManager never clears `moving`, so `elapsed < dur` is checked) or a one-shot AnimationPlayer animation
+  (looping ones and the mood animators — light flicker, post-process fades — don't count). The bot clicks once
+  the game has been free 0.1 game-s, instead of the fixed 0.6 s. Raising the shotgun plays 5 s although the
+  target can be chosen much earlier: it counts as free after 0.6 game-s (target chosen in 1.1 s instead of 5 s).
+- Refused clicks (the game said no, or the key never became clickable) are logged to reports/live_thoughts/
+  as «click refused» with the clickable set and the busy reason. Test runs: 0 refusals.
+- games.csv: a game ends only when the table scene ends (by scene id: at ×20 the death screen can pass between
+  two looks); a moment with no load between rounds no longer cuts a run into pieces. The prize is recorded;
+  a window closed with Alt+F4 still saves the game as «closed».
