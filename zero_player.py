@@ -1,8 +1,8 @@
 """zero_player: one AI player, one module per game. This file starts the right game with the right model.
 
     python zero_player.py                          # the games and their models
-    python zero_player.py buckshot                 # play with the game's default model
-    python zero_player.py buckshot --model d3.1.3-s2 --speed 10 --mute
+    python zero_player.py buckshot_roulette        # play with the game's default model
+    python zero_player.py buckshot_roulette --model d3.1.3-s2 --speed 10 --mute
 
 Each game lives in games/<name>/ with a game.toml: how to launch it, where its models are, which one is the
 default. Everything about a game (its copy, mod, simulator, agents, models, reports, docs) stays in its
@@ -46,8 +46,9 @@ def main() -> None:
         for name, info in all_games.items():
             ready = "" if (info["dir"] / info["game_copy"]).exists() else "  (no game copy yet: see " \
                 + str((info["dir"] / info["docs"]).relative_to(ROOT)) + ")"
-            print(f"  {name:<10} {info['title']}{ready}")
-            print(f"             models: {', '.join(models(info)) or '—'} (default {info['default_model']})")
+            v = info.get("version", {})
+            print(f"  {name:<18} {info['title']}, game {v.get('game', '?')}{ready}")
+            print(f"  {'':<18} models: {', '.join(models(info)) or '—'} (default {info['default_model']})")
         print("\npython zero_player.py <game> [--model <name>] [other options of the game's launcher]")
         return
     info = all_games[sys.argv[1]]

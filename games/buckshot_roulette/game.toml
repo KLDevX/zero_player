@@ -1,0 +1,16 @@
+# What zero_player.py needs to know about this game. Paths are relative to this folder.
+name = "buckshot_roulette"
+title = "Buckshot Roulette (Double or Nothing)"
+launch = "games.buckshot_roulette.launch"   # starts the game copy with the bridge and the AI's brain
+models = "models"                           # trained networks: models/<name>/dqn_<games>.pt
+default_model = "dx1.5"
+game_copy = "game_copy"                     # a copy of the game (never the Steam folder, never in git)
+docs = "docs/how-to-run.md"
+
+# The game version everything here was built and tested on. The bridge reads the game's own scripts by name,
+# so after a game update it may need checking (docs/modding-knowledge.md).
+[version]
+game = "v2.2.0.6"                           # shown in the game's menu as V2.2.0 (STEAM)
+steam_build = 16736575
+engine = "Godot 4.1.1 (custom build with GodotSteam)"
+checked = "2026-10-23"

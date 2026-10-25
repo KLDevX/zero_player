@@ -11,18 +11,18 @@ __pycache__/
 
 # --- trained networks: only the best ones go into git ---------------------------------------------------
 games/*/models/*
-!games/buckshot/models/dx1.5/
-!games/buckshot/models/dx1.4/
-!games/buckshot/models/dx1.3/
-!games/buckshot/models/d3.1/
-!games/buckshot/models/d3.1.3-s2/
-games/buckshot/models/*/tb/
-games/buckshot/models/d3.1/dqn_100.pt
-games/buckshot/models/d3.1/dqn_1000.pt
-games/buckshot/models/d3.1/dqn_10000.pt
-games/buckshot/models/d3.1.3-s2/dqn_100.pt
-games/buckshot/models/d3.1.3-s2/dqn_1000.pt
-games/buckshot/models/d3.1.3-s2/dqn_10000.pt
+!games/buckshot_roulette/models/dx1.5/
+!games/buckshot_roulette/models/dx1.4/
+!games/buckshot_roulette/models/dx1.3/
+!games/buckshot_roulette/models/d3.1/
+!games/buckshot_roulette/models/d3.1.3-s2/
+games/buckshot_roulette/models/*/tb/
+games/buckshot_roulette/models/d3.1/dqn_100.pt
+games/buckshot_roulette/models/d3.1/dqn_1000.pt
+games/buckshot_roulette/models/d3.1/dqn_10000.pt
+games/buckshot_roulette/models/d3.1.3-s2/dqn_100.pt
+games/buckshot_roulette/models/d3.1.3-s2/dqn_1000.pt
+games/buckshot_roulette/models/d3.1.3-s2/dqn_10000.pt
 *.pkl
 
 # --- reports: raw data stays local (logs, thoughts, replays, frames, videos); the summaries are kept ----

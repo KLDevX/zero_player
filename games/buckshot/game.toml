@@ -1,8 +1,0 @@
-# What zero_player.py needs to know about this game. Paths are relative to this folder.
-name = "buckshot"
-title = "Buckshot Roulette (Double or Nothing)"
-launch = "games.buckshot.launch"     # module that starts the game copy with the bridge and the AI's brain
-models = "models"                    # trained networks: models/<name>/dqn_<games>.pt
-default_model = "dx1.5"
-game_copy = "game_copy"              # a copy of the game (never the Steam folder, never in git)
-docs = "docs/how-to-run.md"
