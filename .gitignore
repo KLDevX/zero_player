@@ -31,3 +31,6 @@ games/*/reports/*
 
 # --- tools downloaded with Akel's yes (ffmpeg) ------------------------------------------------------------
 tools/
+
+# --- personal: the assistant instructions stay local (CLAUDE.example.md is the public example) -------------
+CLAUDE.md
