@@ -1,0 +1,10 @@
+{
+  "run": "dx1.3",
+  "agent": "dx (distilled from x1)",
+  "items": true,
+  "lessons": 665668,
+  "val_mse": 0.012603339739143848,
+  "teacher": "x1(16) with base d3.1.3-s2",
+  "init": "C:\\00_Workspace\\02_player\\runs\\dx1.2\\dqn_501707.pt",
+  "training_seconds": 67.1
+}

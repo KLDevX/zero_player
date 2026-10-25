@@ -1,0 +1,14 @@
+{
+  "run": "d3.1.3-s2",
+  "games": 100000,
+  "seed": 2,
+  "training_seconds": 1809.0,
+  "agent": "dqn",
+  "shaping": "hp_events_items",
+  "items": true,
+  "sim": "v2 (items)",
+  "obs": 1,
+  "gamma": 1.0,
+  "n_step": 1,
+  "tables": 32
+}

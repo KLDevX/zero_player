@@ -1,24 +1,33 @@
-# Decompiled game code and game files: never commit or publish (it is the developer's property)
-game_src/
+# --- never commit or publish: the games and their code belong to their developers -------------------
+games/*/game_copy/
+games/*/game_src/
+games/*/save_backup_*/
 *.pck
-# Python
+
+# --- Python -------------------------------------------------------------------------------------------
 __pycache__/
 .venv/
 *.pyc
-# Training outputs
-runs/
+
+# --- trained networks: only the best ones go into git ---------------------------------------------------
+games/*/models/*
+!games/buckshot/models/dx1.5/
+!games/buckshot/models/dx1.4/
+!games/buckshot/models/dx1.3/
+!games/buckshot/models/d3.1/
+!games/buckshot/models/d3.1.3-s2/
+games/buckshot/models/*/tb/
+games/buckshot/models/d3.1/dqn_100.pt
+games/buckshot/models/d3.1/dqn_1000.pt
+games/buckshot/models/d3.1/dqn_10000.pt
+games/buckshot/models/d3.1.3-s2/dqn_100.pt
+games/buckshot/models/d3.1.3-s2/dqn_1000.pt
+games/buckshot/models/d3.1.3-s2/dqn_10000.pt
 *.pkl
-reports/*.db
-reports/*.csv
-reports/*.jsonl
-# Modded copy of the game for live tests (game files, never commit)
-game_lab/
-reports/*.log
-reports/*.png
-reports/*.txt
-reports/replays/
-reports/live_thoughts/
-reports/distill/
-reports/*.json
-reports/ui/
+
+# --- reports: raw data stays local (logs, thoughts, replays, frames, videos); the summaries are kept ----
+games/*/reports/*
+!games/*/reports/games.csv
+
+# --- tools downloaded with Akel's yes (ffmpeg) ------------------------------------------------------------
 tools/
