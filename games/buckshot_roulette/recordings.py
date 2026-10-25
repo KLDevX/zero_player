@@ -7,7 +7,7 @@ A kept run is a folder of game frames (JPG), times.txt (frame name, milliseconds
 sound.wav (the game's sound, recorded from its Master bus). Each frame is shown for as long as it really was
 on screen, so the picture stays in step with the sound: the ×20 parts play fast, the slowed record part plays
 at normal speed. The video goes next to the folder as record_<N>r_<date>.mp4; older record videos are removed
-(only the record is kept, Akel). Needs tools/ffmpeg/ffmpeg.exe (ffmpeg 9.0.2 essentials, gyan.dev).
+(only the record is kept). Needs tools/ffmpeg/ffmpeg.exe (ffmpeg 9.0.2 essentials, gyan.dev).
 """
 from __future__ import annotations
 

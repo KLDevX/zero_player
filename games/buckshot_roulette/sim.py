@@ -327,7 +327,7 @@ class BuckshotEnv:
         s = self.s
         self._log(f"{user} uses {item}")
         # bookkeeping for reward experiments: items with no effect, and new knowledge
-        # Cigarettes are not on this list (Akel, option 2): whether smoking at full HP is useful depends on the
+        # Cigarettes are not on this list: whether smoking at full HP is useful depends on the
         # future (e.g. a dealer with adrenaline stealing them), so the consequences teach it.
         if (item == MEDICINE and s.hp_player == s.max_hp) \
                 or (item == MAGNIFIER and self._player_can_tell_current()) \

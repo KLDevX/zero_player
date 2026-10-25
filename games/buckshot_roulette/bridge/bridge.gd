@@ -87,7 +87,7 @@ var hud_layer: CanvasLayer
 var hud: Control
 var ui := {"ai_on": false, "auto": false, "steps": 0, "panel_i": false, "panel_n": false, "cheat": false,
 		   "model_req": "", "dev_changes": 0, "achievement": false, "restarts": 0, "realtime": true, "record": false}
-# Recording record runs (Akel): every run is recorded — the game's frames (JPG, 4 per second, 15 when slow) and
+# Recording record runs: every run is recorded — the game's frames (JPG, 4 per second, 15 when slow) and
 # its sound (AudioEffectRecord on the Master bus) — and kept only if it beat the record (12 rounds or more);
 # otherwise it is deleted. Near a record the game slows to ×1 so the video can be watched. A kept run is a
 # folder reports/ui/recordings/record_<N>r_<date>/ with frames, times.txt and sound.wav;
@@ -107,7 +107,7 @@ var rec_scene := 0         # the scene whose run is (or was) recorded
 # The player's HP hit 0 in this run. The death screen itself is never seen: in Double or Nothing the game
 # loads the next table in the same frame.
 var run_dead := false
-# The one achievement the bridge may give (Akel's choice): "ach10", dying in Double or Nothing with a prize
+# The one achievement the bridge may give: "ach10", dying in Double or Nothing with a prize
 # over 1 000 000 — the game's own rule (DeathManager.gd:143). The game itself can't give it here, because the
 # bridge switches Steam off (using_steam = false) so nothing reaches the leaderboard; the leaderboard stays
 # off. Only with `achievement on`, and only for the AI's own run: [F1] on all the way, no table-changing
@@ -118,7 +118,7 @@ var run_cheat := false     # `cheat order` was on at the table during this run
 var run_ai := true         # the AI was on ([F1]) the whole run: only then it's the AI's achievement
 var run_endless := false   # what the last frame of the run looked like
 var run_prize := 0
-# Akel: while hunting ach10, a run whose first prize will end under 31 250 is restarted at once (from that
+# While hunting ach10, a run whose first prize will end under 31 250 is restarted at once (from that
 # prize on, 18 rounds are enough instead of 21). The first prize only falls while its timer runs, so the
 # moment the live estimate drops under the line the run can't make it.
 const RESTART_BELOW := 31250
@@ -370,7 +370,7 @@ func _handle(msg: Dictionary) -> Dictionary:
 
 
 # F11: fullscreen ↔ windowed. The game's exclusive fullscreen (OptionsManager.gd:143) sometimes opens
-# shifted right and down; pressing F11 twice (windowed, then fullscreen again) puts it back (Akel's fix).
+# shifted right and down; pressing F11 twice (windowed, then fullscreen again) puts it back.
 func _toggle_fullscreen() -> void:
 	if DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_WINDOWED:
 		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN)
@@ -381,7 +381,7 @@ func _toggle_fullscreen() -> void:
 # While the first prize's timer runs (waiver → end of round 3), speed-up is for the game's animations only:
 # when the cursor is shown somebody is choosing a move, and the game runs at its normal ×1, so a choice costs
 # as much game time as it takes (at ×20 every real millisecond of the bot's reaction cost 20 ms of the prize
-# timer; 189 game-seconds per first cycle). After that the prize is set and everything runs at ×N (Akel).
+# timer; 189 game-seconds per first cycle). After that the prize is set and everything runs at ×N.
 # `realtime off` in the console switches it off.
 func _wanted_scale() -> float:
 	if ui["record"] and rec_dir != "" and rm != null and _scene_ok() and rm.endless \

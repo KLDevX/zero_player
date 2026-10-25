@@ -29,7 +29,7 @@ games/buckshot_roulette/models/d3.1.3-s2/dqn_10000.pt
 games/*/reports/*
 !games/*/reports/games.csv
 
-# --- tools downloaded with Akel's yes (ffmpeg) ------------------------------------------------------------
+# --- downloaded tools (ffmpeg) ---------------------------------------------------------------------------
 tools/
 
 # --- personal: the assistant instructions stay local (CLAUDE.example.md is the public example) -------------

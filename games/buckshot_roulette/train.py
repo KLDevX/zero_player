@@ -39,7 +39,7 @@ def shaped_reward(shaping: str, obs: dict, next_obs: dict, reward: float, round_
     none:         just the goal.
     hp_potential: + 0.1 * change of (my HP - dealer HP) / max HP, potential 0 at the end of a round
                   (potential-based shaping: proven not to change which strategy is best).
-    hp_speed:     - 0.1 per HP the player lost, - 0.02 per action (faster wins pay more). Akel's test (d3).
+    hp_speed:     - 0.1 per HP the player lost, - 0.02 per action (faster wins pay more). Used by d3.
     hp_events:    - 0.1 per HP lost, + 0.1 per HP the dealer loses to a shot, + 0.1 per HP healed (d2.1).
     hp_events_items: hp_events and - 0.02 per item used or stolen (d3.1).
     v4:           - 1 for dying; + 0.1 * change of (my HP - dealer HP) inside the round (damage, healing,

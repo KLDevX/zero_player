@@ -157,11 +157,11 @@ Q-learning implications:
 - **Single-player only.** The `res://multiplayer/` code exists; the bridge mod must refuse to run in
   multiplayer scenes.
 - **No leaderboard submissions** from automated play (`LeaderboardManager.gd`): disable or stub it in the mod.
-  Consider stubbing `AchievementManager.gd` too (unlocking achievements by bot is harmless, but it's Akel's
+  Consider stubbing `AchievementManager.gd` too (unlocking achievements by bot is harmless, but it's the owner's
   call).
 - Decompiled code and assets stay in `games/buckshot_roulette/game_src/` (git-ignored). Never commit or share them. The
   godot-mod-loader wiki and AGO061 both stress this.
-- Downloads (GDRE Tools, loader, xdelta, Godot 4.1.1) only after Akel's explicit "да" with the file name,
+- Downloads (GDRE Tools, loader, xdelta, Godot 4.1.1) only after the owner's explicit consent with the file name,
   source URL and size.
 
 ## 8. Suggested step-0 plan (small steps)

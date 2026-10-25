@@ -230,8 +230,8 @@ class Brain:
             new_scene = obs is not None and st.get("scene_id") not in (None, game_scene)
             if (scene not in ("main", "") or new_scene) and started is not None and last_obs is not None:
                 rounds = last_obs["rounds_beat"]
-                who = self.name if your_moves == 0 else (f"akel (hints {self.name})" if ai_moves == 0
-                                                         else f"akel + {self.name}")
+                who = self.name if your_moves == 0 else (f"human (hints {self.name})" if ai_moves == 0
+                                                         else f"human + {self.name}")
                 who += " (cheats)" if cheated else ""
                 who += " (dev)" if int(ui.get("dev_changes", 0)) > dev_at_start else ""  # hp/shells/items changed
                 save_game({"finished_at": datetime.now().isoformat(timespec="seconds"), "bot": who,
@@ -248,7 +248,7 @@ class Brain:
             # if the game window is closed now (Alt+F4), this game is still saved, as «closed»
             self.pending = None if started is None or last_obs is None else {
                 "finished_at": datetime.now().isoformat(timespec="seconds"), "bot": self.name if your_moves == 0
-                else f"akel + {self.name}", "speed": float(ui.get("speed", 1.0)),
+                else f"human + {self.name}", "speed": float(ui.get("speed", 1.0)),
                 "seconds": round(time.time() - started, 1), "actions": ai_moves + your_moves,
                 "rounds_beat": last_obs["rounds_beat"] + 1, "rounds_survived": last_obs["rounds_beat"],
                 "don_cycles_beat": int(last_pub.get("don_cycles_beat", 0)),

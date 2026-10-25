@@ -118,7 +118,7 @@ class PlannerAgent:
         self.base_name = f"{base.parent.name}@{base.stem.split('_')[-1]}"
         self.samples, self.max_steps = samples, max_steps
         self.rng = random.Random(seed)
-        # x1 = the planner on d3.1; x1.1 = the same planner on a distilled dx network (Akel: keep both apart)
+        # x1 = the planner on d3.1; x1.1 = the same planner on a distilled dx network (kept apart)
         self.version = version or ("x1" if Path(base).resolve() == DEFAULT_BASE.resolve() else "x1.1")
         self.name, self.games_trained = f"{self.version}({samples})", 0
 

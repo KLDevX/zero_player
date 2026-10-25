@@ -22,7 +22,7 @@ from games.buckshot_roulette.dqn import DQNAgent
 GAME = Path(__file__).resolve().parent  # games/buckshot_roulette: its models, reports, docs, game copy
 NETWORKS = ["d1", "d2", "d3", "d2.1", "d3.1", "d4.1", "d4.2.3-s0", "d4.2.3-s1", "d4.2.3-s2",
             "d3.1.3-s0", "d3.1.3-s1", "d3.1.3-s2", "dx1.0", "dx1.1", "dx1.2", "dx1.3", "dx1.4", "dx1.5"]
-WHAT = {"d1": "DQN, +1 per round", "d2": "DQN, HP potential", "d3": "DQN, −HP −action (Akel)",
+WHAT = {"d1": "DQN, +1 per round", "d2": "DQN, HP potential", "d3": "DQN, −HP −action",
         "d2.1": "DQN, HP events", "d3.1": "DQN, HP events − item cost", "d4.1": "DQN, v4 reward + n-step",
         "d4.2.3": "DQN, v4 (cigarettes free), 3 seeds × 32 tables", "d3.1.3": "DQN d3.1, 3 seeds × 32 tables",
         "dx1": "network learned from the x1 planner"}
