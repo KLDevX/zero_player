@@ -1,10 +1,11 @@
-# In-game AI interface — plan (agreed with Akel 2026-10-24; step 1, I, N and developer mode built, UX pass 3)
+# In-game AI interface — plan and build log (2026-10-24 … 25)
 
 Replaces the tkinter overlay: the bridge (a Godot autoload in the lab copy) draws the interface **inside the
 game** with the game's own fonts and colours; Python stays the brain (dx1.5 for fast play, x1 for hints)
 and sends each thought to the bridge. Lab copy only, leaderboard off, single player.
 
 ## Controls
+
 | key | action |
 |---|---|
 | **F1** | AI on/off. Off at start (you play). When switched on it starts in **step mode** |
@@ -23,7 +24,7 @@ and sends each thought to the bridge. Lab copy only, leaderboard off, single pla
 - The game's own fonts (from its pack, e.g. the one on the defibrillator HP display) and colours (live/blank
   from `GlobalVariables.gd`; the colour-blind palette when that setting is on).
 - Dark semi-transparent panels like the game's displays, light scan lines, little text on screen; details
-  only on I / N / F8. 2–3 style variants as screenshots, Akel picks one.
+  only on I / N / F8. 2–3 style variants as screenshots, one is chosen.
 
 ## Steps (30–60 min each, each ends with something visible)
 1. In-game HUD in the bridge: left panel (shells, what you know, shells out, what the dealer used this
@@ -43,7 +44,7 @@ Later: the AI's voice (short spoken-style lines, then the conversation "brain" v
 - `games/buckshot_roulette/bridge/hud.gd` draws both panels inside the game (a CanvasLayer above it, drawn with
   `_draw()` in the game's 960×540 frame, so it is pixelated like the game). Fonts from the pack with
   Cyrillic: Fake Receipt Cyr («чек»), DOTMATRI Ver2_2 («табло»), RobotoSlab Cyrillic («плита»); F6 cycles
-  them until Akel picks one. Shell colours from `GlobalVariables` (colour-blind palette when it is on).
+  them until one is chosen. Shell colours from `GlobalVariables` (colour-blind palette when it is on).
 - Left: shells as coloured pips, the chambered shell (also "по счёту" when the unseen ones are one colour —
   interface only, the agent's input is unchanged), known later shells, shells fired, items the dealer used,
   HP, saw/cuffs. Right: AI mode and speed, the advice / the AI's move, chance to win the round, the next
@@ -54,12 +55,12 @@ Later: the AI's voice (short spoken-style lines, then the conversation "brain" v
   Bridge commands added: `thought`, `take_step`, `screenshot`, `key`; the state reply carries `ui`.
   Several Python connections at once (brain + test tools).
 - Exclusive fullscreen sometimes opens shifted right/down: the bridge leaves it and enters it again, once
-  per game start (Akel's fix). `--mute` / `BRIDGE_MUTE=1` for tests nobody watches.
+  per game start. `--mute` / `BRIDGE_MUTE=1` for tests nobody watches.
 - Tested on the game (muted): menus walked with F1 on, → made one move (phone → «№2 холостой»), Space at
   ×10 played to the end, game saved as `dx1.5@991956` (3 rounds survived, 52 AI moves). Hint mode with F1
   off shows advice. Screenshots: `games/buckshot_roulette/reports/ui/` (git-ignored).
 
-## Built: UX pass 2 (2026-10-24, Akel's notes)
+## Built: UX pass 2 (2026-10-24)
 - One style: «чек» (Fake Receipt Cyr); the other two and F6 removed. All text is drawn in capitals (the font
   is capitals-only and draws some small letters oddly).
 - Fixed panel sizes and fixed rows, text cut with «…»: nothing jumps when the text changes.
@@ -76,12 +77,12 @@ Later: the AI's voice (short spoken-style lines, then the conversation "brain" v
   open every key and click goes to it, not to the game.
 - Cheats show the real order on the «порядок» line (pale shells with a purple mark), on screen only; the
   Python side never receives it, and the game is saved as «… (cheats)».
-- Akel's moments (Steam screenshots 17:53–17:57): dx chose medicine over a safe win because its values only
+- Three moments I saved while playing with hints (17:53–17:57): dx chose medicine over a safe win because its values only
   mean "chance to win this round" — HP doesn't carry over, so with a certain win medicine, cigarettes and the
   shot were all ≈100% (1.007 vs 0.997, inside its noise). An AI fix (prefer the safe/fast move on ties) is
   for later; the interface now says when moves are tied.
 
-## Built: UX pass 3 (2026-10-24, Akel's notes)
+## Built: UX pass 3 (2026-10-24)
 - Keys in square brackets everywhere: [F1], [Space] one move, [Ctrl+Space] auto, [Ctrl+1–4], [I], [N],
   [F11] fullscreen ↔ windowed (press twice to fix the shifted picture; no automatic fix), [~] console (the
   "~" is drawn with the fallback font, the receipt font has a dash there). The arrows go to the game.
@@ -112,7 +113,7 @@ Later: the AI's voice (short spoken-style lines, then the conversation "brain" v
   prize ≥ 31 250 needs 18 rounds instead of 21.
 - `achievement on|off`: the bridge unlocks only "ach10" (DeathManager.gd:143 rule) through Steam when the run
   goes to the death scene with a prize over 1 000 000, and only if [F1] was on all run, no dev commands, no
-  cheats (Akel: the achievement should be his own AI's). Leaderboard stays off (using_steam = false).
+  cheats: the achievement should be earned by the AI itself, not by tricks. Leaderboard stays off (using_steam = false).
   Tested: status, the clean/not-clean check; the unlock itself waits for a real AI run.
 - Game seed (answered, not built): the game uses Godot's global RNG only (no randomize()/RNG objects), so the
   bridge could seed each load; cosmetic randomness every frame makes later situations differ. Identical
@@ -128,7 +129,7 @@ Later: the AI's voice (short spoken-style lines, then the conversation "brain" v
   reset, the same as holding R; not a dev command). Such games are saved with end «restart».
 
 ## Built: busy signal, refused clicks, game records (2026-10-25)
-- ×1 only while the first prize's timer runs (Akel: after the first cycle the prize is set).
+- ×1 only while the first prize's timer runs (after the first cycle the prize is set).
 - The bridge's state reply has `busy`: what keeps the game busy ("" = free) — the camera turning
   (CameraManager never clears `moving`, so `elapsed < dur` is checked) or a one-shot AnimationPlayer animation
   (looping ones and the mood animators — light flicker, post-process fades — don't count). The bot clicks once
@@ -140,7 +141,7 @@ Later: the AI's voice (short spoken-style lines, then the conversation "brain" v
   two looks); a moment with no load between rounds no longer cuts a run into pieces. The prize is recorded;
   a window closed with Alt+F4 still saves the game as «closed».
 
-## Built: clicks when the game allows them (2026-10-25, Akel's choice «В+А»)
+## Built: clicks when the game allows them (2026-10-25)
 - How the game decides a click is allowed — for every clickable thing (shotgun, targets, items, briefcase,
   doors, pills, waiver, double or nothing): the thing's `interactionAllowed`, its collider on, the cursor out,
   and per-action guards like `fs_dec` against a double shot. The bridge's clickable list already checks the
@@ -149,7 +150,7 @@ Later: the AI's voice (short spoken-style lines, then the conversation "brain" v
 - So the bot no longer waits for animations (`busy` stays in the state reply, for the refused-click log only)
   and needs no camera wait either: it clicks things directly, not with the mouse. It clicks once the game has
   allowed the click for 0.05 game-s (a couple of frames). The shotgun exception is gone.
-- Tested, one cycle each (Akel: one cycle is enough): 13 and 8 shots, target chosen 0.07 s after the shotgun
+- Tested, one cycle each (enough for this check): 13 and 8 shots, target chosen 0.07 s after the shotgun
   (was 1.1 s, before that 5 s), no hang, 0 refused clicks. First prize with `achievement on`: 51 278
   (21 078 at the start of the day, 41–43 k with the busy wait). The step-0 freeze was not this.
 

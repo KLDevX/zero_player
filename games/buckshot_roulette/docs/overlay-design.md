@@ -1,8 +1,8 @@
 # Overlay design — showing what the agent thinks (plan, built after the agent)
 
-Akel's wish: an overlay at the top left/right of the game. Two modes:
-1. **Hint mode** — Akel plays, the agent only thinks and suggests.
-2. **Play mode** — the agent plays; Akel picks the speed (1× to watch it, faster to just let it run).
+The goal: an overlay at the top left/right of the game. Two modes:
+1. **Hint mode** — I play, the agent only thinks and suggests.
+2. **Play mode** — the agent plays; I pick the speed (1× to watch it, faster to just let it run).
 A hotkey toggles an "advanced" panel.
 
 ## One pipeline for everything
@@ -37,11 +37,12 @@ A hotkey toggles an "advanced" panel.
   labelled as counts — they are **not** fed back to the agent.
 
 ## The two modes
+
 | | hint mode | play mode |
 |---|---|---|
-| who clicks | Akel | the agent through the bridge |
+| who clicks | the player | the agent through the bridge |
 | game | lab copy now; unmodified game later (screen reader) | lab copy only (needs the bridge) |
-| speed | 1× (Akel plays) | chosen: 1×, 2×, 5×, 10× |
+| speed | 1× (a person plays) | chosen: 1×, 2×, 5×, 10× |
 | pause before a move | — | optional "think pause" (e.g. 1.5 s at 1×) so the thought stays readable |
 | leaderboard | off in the lab copy; on the unmodified game play with Steam offline | off |
 

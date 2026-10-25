@@ -1,10 +1,11 @@
-# Simulator rules (`games/buckshot_roulette/sim.py`) and how sure we are
+# Simulator rules (`games/buckshot_roulette/sim.py`) and how certain each rule is
 
 Confidence: **code** = read in the game's script (file:line in `games/buckshot_roulette/game_src/scripts/`), **scene** = read from
 the game's scene data (`main.scn`, values below), **log** = seen in our live logs (`games/buckshot_roulette/reports/live_*.jsonl`),
 **guess** = not verifiable yet. `BuckshotEnv(items=False)` keeps the v1 rules (no items).
 
 ## Rounds, loads, turns
+
 | Rule | Sim | Confidence |
 |---|---|---|
 | A game = rounds (batches) until the player dies; 3 rounds = one Double-or-Nothing cycle, then take the prize or continue | `_win_batch` | code `RoundManager.gd:482-497, 432-457` |
@@ -18,6 +19,7 @@ the game's scene data (`main.scn`, values below), **log** = seen in our live log
 | Live = 1 damage, 2 with the saw | `_shoot` | code `ShotgunShooting.gd:119-131` |
 
 ## Items
+
 | Rule | Sim | Confidence |
 |---|---|---|
 | Each load both sides draw the slot's item count, one by one, uniform among items below their cap; 8 slots per side; full → the rest is lost | `_draw_items` | code `ItemManager.gd:213-262, 344-395` |
@@ -38,6 +40,7 @@ the game's scene data (`main.scn`, values below), **log** = seen in our live log
 ## The dealer (`_dealer_turn`, `DealerIntelligence.gd:65-281, 282-303, 421-431`)
 Each step of his turn he goes through his items **in draw order** and takes the first one a rule wants,
 uses it, and starts again; when no rule fires he shoots.
+
 | Rule | Confidence |
 |---|---|
 | Knows the shell if it is the last one, or the real counts + his phone memory settle it → target: blank → self, live → player | code `:96-110, 282-303` |
@@ -63,7 +66,7 @@ last shell that left the gun, its own knowledge (current shell, later shells fro
 sides, saw, cuffs, phase (turn / steal / double). Never the order, never the dealer's knowledge.
 
 ## Not simulated
-- The prize (`70000 − time/600·40000`, then ×2): it depends on real time; we track rounds.
+- The prize (`70000 − time/600·40000`, then ×2): it depends on real time; the project tracks rounds.
 - Timers (adrenaline steal 7 s), animations.
 
 ## Corrections

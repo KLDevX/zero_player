@@ -1,6 +1,6 @@
 # Modding knowledge base — Buckshot Roulette (and general lessons)
 
-Collected 2026-10-23 for stage 1, step 0 (feasibility). Facts are marked **[verified]** (checked on Akel's PC)
+Collected 2026-10-23 for stage 1, step 0 (feasibility). Facts are marked **[verified]** (checked on my PC)
 or **[source]** (from a third-party page — verify against our own decompile before relying on it).
 
 ## 0. TL;DR for step 0
@@ -46,6 +46,7 @@ or **[source]** (from a third-party page — verify against our own decompile be
     already contain dev shortcuts (skip, speed-up) — check it first.
 
 ## 2. Toolchain
+
 | Tool | Use | Notes |
 |---|---|---|
 | **GDRE Tools** (github.com/GDRETools/gdsdecomp) | Recover the project | "RE Tools → Recover project → Full Recovery". Output goes to `games/buckshot_roulette/game_src/` only (git-ignored). [source: Fandom wiki, godot-mod-loader wiki] |
@@ -118,7 +119,8 @@ fallback in `CLAUDE.md`.
   self-play. [CameronScarpati] Get it exactly right in the simulator.
 
 ## 5. Existing solvers — cross-checks and benchmarks
-| Repo | What | Use for us |
+
+| Repo | What | Use here |
 |---|---|---|
 | CameronScarpati/buckshot-roulette-bot (C++) | Exact expectiminimax over the information state, memoized, with a reload horizon; 2–4 seats; all 11 items; `games/buckshot_roulette/docs/RULES.md` with a **confidence level per rule**; a Python oracle for differential testing; an invariance test ("naming an unseen shell must not change the answer") | Rules cross-check. A benchmark opponent and evaluator for our Q-agent. Search sizes: 76k states with 2 items per seat at one reload, 263k with 3, 1.5M with 4. A 2-reload search at 4 charges took ~2 min and 2 GB |
 | bx6xb/buckshot-roulette-solver | CV overlay plus an exact solver; **port of the real `DealerIntelligence.gd`**; Rust core with a Python fallback | Reference for the dealer behaviour and for the vision route |
@@ -137,8 +139,8 @@ Q-learning implications:
 
 ## 6. General lessons from previous modding work
 - **Three layers** in every mod: a framework/loader (what gives access), code (logic), assets.
-- **Verify against the real binary, not old guides.** In Cyberpunk 2.5 we extracted strings from the exe to
-  confirm which config keys still existed. Here the same trick gave the engine version and the script map.
+- **Verify against the real binary, not old guides.** In an earlier Cyberpunk 2.5 mod, strings extracted from the exe
+  showed which config keys still existed. Here the same trick gave the engine version and the script map.
 - **Frameworks lag behind patches.** Loaders and patches target exact builds. Record the build id and check
   compatibility before patching.
 - **Back up first, and never patch the Steam original.** Work on a copy in a separate folder. Steam's

@@ -4,13 +4,13 @@ Status: **done**. State, actions and speed work on the real game; one game still
 Build checked: Steam buildid `16736575`, `GlobalVariables.gd` says `v2.2.0` hotfix `6`, Godot `4.1.1.stable.custom`.
 Every claim below cites `games/buckshot_roulette/game_src/scripts/<file>:<line>` (local, git-ignored; never commit the code itself).
 
-## 1. How we got the code
+## 1. Getting the code
 - The pack is embedded in the exe (PCK format 2, starts at byte 57 826 816, **not encrypted**, 3572 files).
 - File offsets in the directory are **absolute in the exe** (`files_base` = 58 282 384), not relative to the
   pack start — first try read empty files because of that.
 - GDScript is stored as **plain text** (Godot 4.1 has no bytecode export), so no GDRE Tools download was
   needed to read it. A 40-line Python reader extracted 99 single-player `.gd` files + `project.binary`
-  into `games/buckshot_roulette/game_src/` (`res://multiplayer/` skipped on purpose). GDRE is still needed later if we rebuild the
+  into `games/buckshot_roulette/game_src/` (`res://multiplayer/` skipped on purpose). GDRE is still needed for a rebuild of the
   project with a mod loader (scenes `.scn` are binary).
 
 ## 2. Speed
@@ -20,13 +20,14 @@ Every claim below cites `games/buckshot_roulette/game_src/scripts/<file>:<line>`
   So the game was played at 10× by its author — a good sign it survives it.
 - Game timers use `get_tree().create_timer(t, false)` (e.g. `RoundManager.gd:92`), i.e. they **follow**
   `Engine.time_scale`. Score/prize timers use `get_process_delta_time()` (scaled too).
-- Things that reset our speed (a mod must re-apply its scale or patch them):
+- Things that reset the bot's speed (a mod must re-apply its scale or patch them):
   - `RoundManager.gd:63` sets `Engine.time_scale = 1` in `_ready()` (scene load).
   - `ShotgunShooting.gd:69` calls `TimeScaleManager.BeginTimeScaleLerp(.2, 1.0)` when the dealer is killed
     (slow-mo), and `TimeScaleManager.gd:21-27` lerps `Engine.time_scale` back to **1.0**.
 - Not verified yet: physics (ejected shells), audio pitch, animation glitches at 5–10×.
 
 ## 3. State — where it lives (all reachable from one `RoundManager` node)
+
 | What | Where |
 |---|---|
 | Shell order (hidden!) | `ShellSpawner.sequenceArray` (`ShellSpawner.gd:20`), `[0]` is the chambered shell (`ShotgunShooting.gd:109`) |
@@ -59,17 +60,17 @@ So a mod can play by calling these directly, no fake clicks.
 - Dealer in endless deduces the shell from public counts + its own memory (`DealerIntelligence.gd:96-104,282-303`)
   and its "coin flip" picks the majority colour (`DealerIntelligence.gd:421-431`). It does not read the
   hidden order directly except where a real player could know it (last shell, after its own magnifier).
-- **Prize ≠ progress** (Akel's point, confirmed): first prize `= 70000 − initial_time/600·40000` (min 10)
+- **Prize ≠ progress** (I suspected it from playing; the code confirms it): first prize `= 70000 − initial_time/600·40000` (min 10)
   after beating 3 batches (`RoundManager.gd:385-396`); each next cycle doubles it (`RoundManager.gd:397-402`);
   the leaderboard uploads `initial · 2^(rounds_beat−1)` (`LeaderboardManager.gd:176-181`).
-  The prize depends on how fast the first cycle was, so our **main progress metric is rounds survived**,
+  The prize depends on how fast the first cycle was, so the **main progress metric is rounds survived**,
   not money. The game's "ROUNDS BEAT" counter is `brief.ending.endless_roundsbeat`, +1 per batch indicator
   (`RoundManager.gd:186`); check live whether it counts the batch you die in.
 
 ## 6. Online parts to switch off in the bridge mod
 - Leaderboard upload: `EndingManager.gd:175` → `LeaderboardManager.UploadScore()` when `using_steam`.
   The mod must stub `UploadScore` before any automated game.
-- Achievements (`AchievementManager.gd`) — harmless, Akel's call.
+- Achievements (`AchievementManager.gd`) — harmless; left to the owner's decision.
 
 ## 7. Live test 1 — reading state works (2026-10-23)
 **Route: no download, no exe patch.** Godot reads `override.cfg` next to the exe at startup; ours adds one
@@ -84,7 +85,7 @@ autoload, `games/buckshot_roulette/bridge/bridge.gd` (absolute path works in the
   scene reload (death → main), and appends one JSON line per state change to `games/buckshot_roulette/reports/live_*.jsonl`
   (`public` part + `_hidden` part for checking only). Watch it live: `python -m games.buckshot_roulette.bridge.watch`.
 
-Results of Akel's first game (one Double-or-Nothing run, died in round 3):
+Results of my first game with the bridge (one Double-or-Nothing run, died in round 3):
 - All fields read correctly and change as expected: HP both sides, loaded live/blank and max HP per load,
   shells left, item counts on both sides, cuffs, saw, rounds beat. 168 state lines, 0 script errors.
 - `rounds_beat` was 3 when he died in round 3 → the counter **includes the round you die in**; rounds
@@ -95,7 +96,7 @@ Results of Akel's first game (one Double-or-Nothing run, died in round 3):
   game-time measurement.
 - `player_input` (= `deskUI_shotgun.visible`) is also true outside a turn (e.g. before the first load) →
   needs a better "waiting for the player" signal before the bridge sends actions.
-- The game process ended with exit code 139 right after "changing scene to: menu" — Akel had closed the
+- The game process ended with exit code 139 right after "changing scene to: menu" — I had closed the
   window there, so this one is a crash on close, not in play.
 
 ## 8. Live test 2 — actions and speed (random test bot)
@@ -112,13 +113,13 @@ Problems found and fixed on the way:
 - Clicking 50 ms after grabbing the shotgun (mid-animation) froze the game → the bot now acts only when
   the legal set has been stable for 0.6 s of game time (human-like reaction).
 - During an adrenaline steal the game leaves the player's own items "allowed", but the camera faces the
-  dealer's side so a human can't click them (Akel's catch) → the bridge offers only dealer items then.
+  dealer's side so a human can't click them (I noticed the bot doing it) → the bridge offers only dealer items then.
 - After the first dealer kill `TimeScaleManager` keeps writing `Engine.time_scale = 1.0` every frame (its
-  `moving` flag is never cleared) → speed silently fell to 1× (Akel saw it). The bridge now clears the flag
+  `moving` flag is never cleared) → speed silently fell to 1× (I noticed it while watching). The bridge now clears the flag
   and sets its scale last in the frame (`process_priority`); the log records the real per-frame scale.
 - Waiver: lowercase keys; one letter is enough.
 
-Measured on Akel's laptop (games start at the pills, include the walk to the table; random moves, so most
+Measured on my laptop (games start at the pills, include the walk to the table; random moves, so most
 die in round 1 — a stronger player plays longer games):
 
 | speed | games | seconds per game | seconds per action | crashes / stalls |

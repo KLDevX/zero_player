@@ -8,7 +8,7 @@ Accuracy is measured against x1 with base d3.1.3-s2 — the teacher of dx and x1
 |---|---|---|---|---|---|---|---|---|
 | d1 | DQN, +1 per round | 32 min | 3.51 | 77.8% | 41 | 67% | 81% | 4.8 pts |
 | d2 | DQN, HP potential | 43 min | 3.80 | 79.2% | 39 | 67% | 82% | 4.6 pts |
-| d3 | DQN, −HP −action (Akel) | 49 min | 4.44 | 81.6% | 41 | 68% | 82% | 4.5 pts |
+| d3 | DQN, −HP −action | 49 min | 4.44 | 81.6% | 41 | 68% | 82% | 4.5 pts |
 | d2.1 | DQN, HP events | 41 min | 3.93 | 79.7% | 33 | 67% | 82% | 4.6 pts |
 | d3.1 | DQN, HP events − item cost | 42 min | 4.64 | 82.3% | 43 | 69% | 83% | 4.2 pts |
 | d4.1 | DQN, v4 reward + n-step | 29 min | 3.35 | 77.0% | 33 | 67% | 81% | 4.8 pts |

@@ -1,6 +1,6 @@
 # Progress log — versions of the player
 
-**Names (Akel, from d4 on): d‹idea›.‹tweak›.‹training method›** — the method digit: 0 = one seed, one table
+**Names (from d4 on): d‹idea›.‹tweak›.‹training method›** — the method digit: 0 = one seed, one table
 (as before); 1 = several seeds (`python -m games.buckshot_roulette.multiseed`); 2 = several tables at once
 (`train.py --tables 32`); 3 = both. Older runs (d1 … d3.1, d4.1) are method 0.
 
@@ -15,7 +15,7 @@ kept in `games/buckshot_roulette/models/archive/<tag>/` (local only, git-ignored
 | `v0.2-qtable-items` | 2026-10-23 | sim v2 (items, dealer items), Q-table on HP + shells, 300k games in 219 s | 1.52 | 60.4% |
 | `v0.3-dqn` | 2026-10-23 | sim v2, **DQN** (50 → 64 → 64 → 21), 100k games in 32 min | 3.56 | 78.1% |
 | `v0.4-reward-shaping` | 2026-10-23 | DQN d2: + HP potential (safe shaping) | 3.79 | 79.1% |
-| `v0.4-reward-shaping` | 2026-10-23 | DQN d3 (Akel's reward): −0.1 per HP lost, −0.02 per action | 4.28 | 81.1% |
+| `v0.4-reward-shaping` | 2026-10-23 | DQN d3: −0.1 per HP lost, −0.02 per action | 4.28 | 81.1% |
 | `v0.5-event-rewards` | 2026-10-23 | DQN d2.1: −0.1 per HP lost, +0.1 per dealer HP hit, +0.1 per HP healed | 3.93* | 79.7%* |
 | `v0.5-event-rewards` | 2026-10-23 | DQN **d3.1**: d2.1 + −0.02 per item used/stolen | **4.64*** | **82.3%*** |
 
@@ -52,13 +52,18 @@ kept in `games/buckshot_roulette/models/archive/<tag>/` (local only, git-ignored
 - Money (not trained for it): it never takes the prize. Had it stopped after the first cycle: 49% × first
   prize; after the second: 23% × 2 = 0.47 × first prize.
 - Pictures: `games/buckshot_roulette/docs/img/v0.3-learning-curves.png`, `games/buckshot_roulette/docs/img/v0.3-network-d1.png`
-  (`python -m games.buckshot_roulette.viz curves|network <checkpoint>`); live: `tensorboard --logdir runs`.
+  (`python -m games.buckshot_roulette.viz curves|network <checkpoint>`); live: `tensorboard --logdir games/buckshot_roulette/models`.
 
 ![learning curves](img/v0.3-learning-curves.png)
 ![network](img/v0.3-network-d1.png)
 
-## v0.4-reward-shaping (Akel's experiment) + overlay v1
-Same network, simulator and seed as d1; only the reward changes (`train.py --shaping`).
+## v0.4-reward-shaping + overlay v1
+Same network, simulator and seed as d1; only the reward changes (`train.py --shaping`). d2 is the textbook
+choice (potential-based shaping can't change which strategy is best). I meant d3 as the opposite: an
+example of a bad reward. A cost for every action looked like it would teach the agent to avoid items, even
+useful ones, and the HP penalty only says what it already gets from losing a round. I expected it to come
+out worse than d1. It came out the best of the three.
+
 | run | reward on top of +1 per round won | rounds/game | rounds won | moves per round |
 |---|---|---|---|---|
 | d1 | — | 3.56 | 78.1% | 11.5 |
@@ -66,14 +71,14 @@ Same network, simulator and seed as d1; only the reward changes (`train.py --sha
 | d3 | − 0.1 per HP lost, − 0.02 per action | **4.28** | **81.1%** | **9.8** |
 (5 000 games, exploration off; moves per round from the replays.)
 
-Why d3 wins (from the replays, `games/buckshot_roulette/reports/replays/*/stats.json`): it is **faster** — 9.8 moves per round
+Why it worked anyway (from the replays, `games/buckshot_roulette/reports/replays/*/stats.json`): it is **faster** — 9.8 moves per round
 instead of 11.5, so the dealer gets fewer turns to draw items and hit back — and the HP penalty arrives
 on the very move that lost HP. It is *not* tidier with items: it wastes cigarettes at full HP more often
 (53% vs 32%), and the speed cost makes it skip the saw on a known live shell 22% of the time (d1 3%).
 Learning curves (per tenth): d3 0.23 0.35 0.60 1.08 2.24 3.51 3.46 3.43 3.41 3.39.
 
 Overlay v1 works on the lab copy: hint mode and play mode (see games/buckshot_roulette/docs/overlay-design.md). First real games
-of d1 through it: 3 games, 1.33 rounds/game (too few to judge; Akel saw it skip cigarettes and beer — d1
+of d1 through it: 3 games, 1.33 rounds/game (too few to judge; I watched it skip cigarettes and beer — d1
 also rarely uses them in the simulator: beer 9%, cigarettes 15% of the time they are possible). Every live
 decision is now logged to `games/buckshot_roulette/reports/live_thoughts/` and checked by `python -m games.buckshot_roulette.livecheck`.
 
@@ -82,10 +87,13 @@ decision is now logged to `games/buckshot_roulette/reports/live_thoughts/` and c
 ![mistakes](img/v0.4-compare-mistakes.png)
 ![learning curves](img/v0.4-learning-curves.png)
 
-## v0.5-event-rewards (Akel's d2.1 and d3.1)
+## v0.5-event-rewards (d2.1 and d3.1)
+After d3 I wanted to know which part of it mattered, so I split the idea into events: lose HP, hit the dealer,
+heal — and, for d3.1, a small cost per item instead of per action.
 Same network, simulator and seed; reward per event (`train.py --shaping hp_events | hp_events_items`).
 Numbers from the replays (5 000 games, seed 7, exploration off — rows marked * above; d1–d3 on the same
 replays: 3.51 / 3.80 / 4.44).
+
 | run | rounds/game | rounds won | moves/round | cigarettes at full HP | hurt, has cigarettes, doesn't smoke | knows live + has saw, shoots without |
 |---|---|---|---|---|---|---|
 | d1 | 3.51 | 77.8% | 11.5 | 32% | 82% | 3% |
@@ -114,7 +122,9 @@ saw on a known live shell. Still left: expired medicine at full HP (30%).
   style, not a reading error.
 
 ## v4.0 design → d4.1 (built 2026-10-23, not trained yet)
-Agreed with Akel: tell the agent what is clearly good or bad **by consequences**, never which move to make.
+The rule for this reward: tell the agent what is clearly good or bad **by its consequences**, never which
+move to make.
+
 | event | reward |
 |---|---|
 | round won | +1 |
@@ -124,7 +134,7 @@ Agreed with Akel: tell the agent what is clearly good or bad **by consequences**
 | item with no effect: healing at full HP, magnifier on a known/deducible shell, cuffs on the last shell, saw on a 1-HP dealer | −0.05 |
 | useful item, steal | 0 |
 | later rewards | × 0.99 per move (γ) |
-Rejected on purpose: −10 "critical mistake" + stopping the game (we'd be deciding what's critical; it
+Rejected on purpose: −10 "critical mistake" + stopping the game (I'd be deciding what's critical; it
 drowns the small signals), a risk penalty for self-shots (it bakes a "> 75% blank" rule into the reward),
 +0.05 for a known blank at yourself (redundant, and a loophole next to the inverter), items left at death.
 Training: n-step = 3 (a plan's payoff reaches its first move sooner). Observation v2: + the order of shells
@@ -149,16 +159,17 @@ n-step, observation), so the cause is unknown; one seed only, so luck is possibl
 ![results](img/v0.6-compare-results.png)
 ![mistakes](img/v0.6-compare-mistakes.png)
 
-## d4.2 reward tweak (Akel): cigarettes off the "no effect" list
+## d4.2 reward tweak: cigarettes off the "no effect" list
 Rollouts with d4.1 (300 tables × 10 each): smoking at full HP vs keeping the cigarettes — dealer hurt +
 adrenaline + no own cigarettes: 81.6% vs 81.6% rounds won (denying him the heal makes up for it); dealer at
-full HP + adrenaline: 65.9% vs 67.8%. So "no effect" was wrong for cigarettes. Akel chose to drop them from
+full HP + adrenaline: 65.9% vs 67.8%. So "no effect" was wrong for cigarettes. I chose to drop them from
 the list instead of special-casing the dealer (that would hand the agent the dealer's rule): smoking at
-full HP now gives 0, the consequences teach the rest. The mistake board (for us only) still counts smoking
+full HP now gives 0, the consequences teach the rest. The mistake board (for analysis only, the agent never sees it) still counts smoking
 at full HP as a mistake except in the denial case.
 
 ## d4.2.3 (3 seeds × 32 tables, 100k games each, 22 min for all three)
 Same 5 000 replay games (seed 7, exploration off):
+
 | run | rounds/game | rounds won | best | cig at full HP | medicine at 1 HP | knows live + has saw, no saw | inverter tactic done |
 |---|---|---|---|---|---|---|---|
 | d3.1 (1 seed) | **4.64** | **82.3%** | 43 | 12% | 23% | 0% | 56 / 966 |
@@ -173,6 +184,7 @@ is weaker than d3.1 here; d3.1 is a single seed, so its own luck is unknown too.
 ![mistakes](img/v0.7-compare-mistakes.png)
 
 ## d3.1.3 (d3.1 trained with 3 seeds × 32 tables) and x1 (the planner)
+
 | run | games | rounds/game | rounds won | best |
 |---|---|---|---|---|
 | d3.1 (1 seed, 1 table) | 5 000 | 4.64 | 82.3% | 43 |
@@ -190,8 +202,9 @@ is weaker than d3.1 here; d3.1 is a single seed, so its own luck is unknown too.
 ![results](img/v0.8-compare-results.png)
 ![mistakes](img/v0.8-compare-mistakes.png)
 
-## dx1 — the network learns from the planner (night of 2026-10-24, 1 h 50 min, all automatic)
-`python -m games.buckshot_roulette.distill loop`. Teacher: x1 (16 samples per move, base player d3.1.3-s2).
+## dx1 — the network learns from the planner (night of 2026-10-24, 1 h 50 min)
+x1 plays well but slowly, so I tried to teach a plain network to play like it. I started the whole loop before
+going to bed and it ran on its own: `python -m games.buckshot_roulette.distill loop`. Teacher: x1 (16 samples per move, base player d3.1.3-s2).
 1. x1 played 3 000 games and wrote the chance to win the round for every legal move: 194 022 tables (16 min,
    12 processes). The double-or-nothing question isn't calculated by x1, so 3 000 rows teach "go on"
    (worth the mean best chance) vs "take the money" (0) — without them dx1.0 took the money after
@@ -200,6 +213,7 @@ is weaker than d3.1 here; d3.1 is a single seed, so its own luck is unknown too.
    legal moves) — 24 s.
 3. DAgger ×5: the latest dx plays 3 000 games, x1 answers on the tables *dx* reached (its own mistakes
    included), the lessons add up, the next dx starts from the previous one.
+
 | version | lessons | prediction error (rmse) | rounds/game (5 000 games) | rounds won | best |
 |---|---|---|---|---|---|
 | dx1.0 | 197 k | 0.123 | 4.84 | 82.9% | 62 |
