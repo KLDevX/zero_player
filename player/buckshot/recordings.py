@@ -34,7 +34,7 @@ def make_mp4(folder: Path) -> Path:
     cmd = [str(FFMPEG), "-y", "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(listing)]
     if (folder / "sound.wav").exists():
         cmd += ["-i", str(folder / "sound.wav"), "-c:a", "aac", "-b:a", "128k"]
-    cmd += ["-vf", "scale=1920:1080:flags=neighbor,format=yuv420p", "-c:v", "libx264", "-crf", "26",
+    cmd += ["-vf", "scale=1920:1080:flags=neighbor,format=yuv420p", "-c:v", "libx264", "-crf", "28",
             "-preset", "veryfast", "-fps_mode", "vfr", "-shortest", str(out)]
     subprocess.run(cmd, check=True)
     return out

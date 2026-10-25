@@ -152,3 +152,13 @@ Later: the AI's voice (short spoken-style lines, then the conversation "brain" v
 - Tested, one cycle each (Akel: one cycle is enough): 13 and 8 shots, target chosen 0.07 s after the shotgun
   (was 1.1 s, before that 5 s), no hang, 0 refused clicks. First prize with `achievement on`: 51 278
   (21 078 at the start of the day, 41–43 k with the busy wait). The step-0 freeze was not this.
+
+## ach10 by the AI (2026-10-25)
+- dx1.5, clean run (F1 on all the way, no dev commands, no cheats), ×20 with choices at ×1 in the first
+  cycle: first prize 37 345, 24 rounds won, died with a prize of 4 779 776 at 03:36. The bridge gave ach10;
+  Steam confirms it («в Steam: уже получено», reports/ui/ach10_game.png). Hunt: 21 runs since 02:34.
+- Video of the whole run: reports/ui/recordings/record_24r_2026-10-25T02-57-24.mp4 (38:51, 834 MB, sound).
+- Known problem: at the end of a long recorded run the bridge saves the sound (448 MB WAV) and the frame list
+  in one frame, the game stalls over 5 s and Python's 5 s socket timeout drops the brain and the watcher.
+  To fix: save in steps / stream the sound, or a longer timeout. The laptop also slept twice: the game now
+  keeps the screen on; ffmpeg runs need the session awake too.
